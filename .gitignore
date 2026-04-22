@@ -1,0 +1,26 @@
+# Ambiente
+.env
+*.env
+
+# Banco de dados e cache
+bot.db
+*.db
+cache_rotas.json
+usuarios.json
+usuarios.json.bak
+
+# Debug / logs
+debug_*.html
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbbs.db

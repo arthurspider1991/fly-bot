@@ -1,0 +1,13 @@
+# nixpacks.toml (fallback se o Railway não usar o Dockerfile)
+[phases.setup]
+nixPkgs = ["python311", "chromium"]
+
+[phases.install]
+cmds = [
+  "pip install -r requirements.txt",
+  "playwright install chromium",
+  "playwright install-deps chromium"
+]
+
+[start]
+cmd = "python main.py"
