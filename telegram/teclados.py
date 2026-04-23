@@ -76,17 +76,29 @@ def teclado_aeroportos_pais(prefixo: str, pais: str) -> dict:
     return {"inline_keyboard": botoes}
 
 
+MESES_PT = {
+    1: "Janeiro", 2: "Fevereiro", 3: "Março",    4: "Abril",
+    5: "Maio",    6: "Junho",     7: "Julho",     8: "Agosto",
+    9: "Setembro",10: "Outubro", 11: "Novembro", 12: "Dezembro",
+}
+
 def teclado_data(prefixo: str) -> dict:
     hoje   = datetime.now()
     botoes = []
     row    = []
+    # Gera os próximos 12 meses em ordem correta
+    ano_atual = hoje.year
+    mes_atual = hoje.month
     for i in range(1, 13):
-        mes = hoje + timedelta(days=30 * i)
+        mes_num = (mes_atual - 1 + i) % 12 + 1
+        ano_num = ano_atual + (mes_atual - 1 + i) // 12
+        label   = f"{MESES_PT[mes_num]}/{str(ano_num)[2:]}"
+        data_iso = f"{ano_num}-{mes_num:02d}-01"
         row.append({
-            "text":          mes.strftime("%b/%y").capitalize(),
-            "callback_data": f"{prefixo}:mes:{mes.strftime('%Y-%m-01')}",
+            "text":          label,
+            "callback_data": f"{prefixo}:mes:{data_iso}",
         })
-        if len(row) == 3:
+        if len(row) == 2:
             botoes.append(row)
             row = []
     if row:

@@ -130,21 +130,51 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
     if hist60_ida and preco_ida:
         checar_alertas_especiais(chat_id, dados, preco_ida, hist60_ida, _enviar)
 
+    # ── Análise rápida de preço ───────────────────────────────────────────────
+    def _tag_rapida(preco, hist_salvo_chave):
+        """Retorna tag curta de análise para o ciclo normal."""
+        ant = hist_dados.get(hist_salvo_chave)
+        precos_hist = [h["preco"] for h in hist60_ida] if hist60_ida else []
+        tags = []
+        # Tendência vs anterior
+        if ant:
+            pct = (preco - ant) / ant * 100
+            if pct >= 2:   tags.append("📈 subindo")
+            elif pct <= -2: tags.append("📉 caindo")
+            else:           tags.append("➡️ estável")
+        # Vs média 30 dias
+        if precos_hist:
+            media30 = sum(precos_hist[:30]) / min(30, len(precos_hist))
+            pct_m   = (preco - media30) / media30 * 100
+            if pct_m <= -10:  tags.append("✅ preço bom")
+            elif pct_m <= 5:  tags.append("🟡 na média")
+            else:             tags.append("🔴 acima da média")
+        return " · ".join(tags) if tags else ""
+
     # ── Monta mensagem principal ──────────────────────────────────────────────
     linhas = [f"✈️ *{origem} → {destino}* | {_iso_para_br(data_ida)}\n"]
 
+    # Ida
     if preco_ida is not None:
-        linhas.append(f"💰 Menor preço agora: *R$ {preco_ida:.0f}*")
+        tag_ida = f" — {_tag_rapida(preco_ida, 'preco_ida')}" if modo == "normal" else ""
+        linhas.append(f"💰 Ida:   *R$ {preco_ida:.0f}*{tag_ida}")
     else:
         ant = hist_dados.get("preco_ida")
-        linhas.append(f"💰 Preço: R$ {ant:.0f} _(último conhecido)_" if ant else "💰 Preço: ⚠️ sem dados")
+        linhas.append(f"💰 Ida:   R$ {ant:.0f} _(último conhecido)_" if ant else "💰 Ida:   ⚠️ sem dados")
 
-    if data_volta and preco_volta is not None:
-        linhas.append(f"↩️ Volta {destino}→{origem} | {_iso_para_br(data_volta)}: *R$ {preco_volta:.0f}*")
-        if preco_ida:
-            linhas.append(f"💳 Total ida+volta: *R$ {(preco_ida + preco_volta):.0f}*")
+    # Volta
+    if data_volta:
+        if preco_volta is not None:
+            tag_volta = f" — {_tag_rapida(preco_volta, 'preco_volta')}" if modo == "normal" else ""
+            linhas.append(f"↩️ Volta: *R$ {preco_volta:.0f}*{tag_volta}")
+            if preco_ida:
+                linhas.append(f"💳 Total: *R$ {(preco_ida + preco_volta):.0f}*")
+        else:
+            ant = hist_dados.get("preco_volta")
+            linhas.append(f"↩️ Volta: R$ {ant:.0f} _(último conhecido)_" if ant else "↩️ Volta: ⚠️ sem dados")
 
     linhas.append("")
+    linhas.append(f"💡 Se acha que esse valor é ideal, compre agora:")
     linhas.append(link_flights(origem, destino, data_ida))
     linhas.append("")
 
@@ -194,13 +224,14 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
     # Próxima atualização
     proxima = datetime.now() + timedelta(hours=2)
     dados["proxima_busca"] = proxima.isoformat()
-    linhas.append(f"_Próxima atualização: {proxima.strftime('%H:%M')} • {now_str}_")
 
     if modo in ("completo", "manha"):
         linhas.append("")
         linhas.append("─────────────────────")
         linhas.append(COMANDOS_USUARIO)
         linhas.append("\n/suporte")
+
+    linhas.append("\n_Você receberá novas atualizações em 2 horas_")
 
     salvar_usuario(chat_id, dados)
     _enviar(chat_id, "\n".join(linhas))

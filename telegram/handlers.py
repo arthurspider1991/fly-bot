@@ -169,6 +169,16 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
                 editar_mensagem_markup(chat_id, msg_obj["message_id"])
             return
 
+        # Campanha — botão "Começar monitoramento"
+        if callback_data == "campanha_iniciar":
+            dados["plano"] = None
+            salvar_usuario(chat_id, dados)
+            enviar(chat_id,
+                "✅ Ótima escolha!\n\nEscolha o plano que melhor se encaixa para você:",
+                reply_markup=teclado_planos()
+            )
+            return
+
         # Escolha de plano
         if callback_data.startswith("plano:"):
             plano          = callback_data.split(":")[1]
@@ -202,7 +212,7 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
     # ADMIN — comandos de texto
     # ══════════════════════════════════════════════════════════════════════════
     if is_admin(chat_id):
-        _processar_admin(chat_id, texto, nome, dados)
+        _processar_admin(chat_id, texto, nome, dados, msg_obj)
         return
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -318,7 +328,7 @@ def _processar_navegacao(chat_id, callback_data, dados, nome, status):
             return
 
 
-def _processar_admin(chat_id, texto, nome, dados):
+def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
     todos = carregar_todos_usuarios()
 
     if texto.startswith("/liberar"):
@@ -406,7 +416,63 @@ def _processar_admin(chat_id, texto, nome, dados):
                 enviar(int(uid), msg_texto)
                 enviados += 1
                 time.sleep(0.3)
-        enviar(chat_id, f"✅ Mensagem enviada para *{enviados}* usuários.")
+        enviar(chat_id, f"✅ Mensagem enviada para *{enviados}* usuário(s) ativos.")
+        return
+
+    if texto.startswith("/broadcast_pendentes "):
+        msg_texto = texto[len("/broadcast_pendentes "):].strip()
+        if not msg_texto:
+            enviar(chat_id, "❌ Use: `/broadcast_pendentes <mensagem>`"); return
+        enviados = 0
+        for uid, u in todos.items():
+            if u.get("status") == "aguardando_pagamento":
+                enviar(int(uid), msg_texto)
+                enviados += 1
+                time.sleep(0.3)
+        enviar(chat_id, f"✅ Mensagem enviada para *{enviados}* usuário(s) pendentes.")
+        return
+
+    if texto.startswith("/broadcast_todos "):
+        msg_texto = texto[len("/broadcast_todos "):].strip()
+        if not msg_texto:
+            enviar(chat_id, "❌ Use: `/broadcast_todos <mensagem>`"); return
+        enviados = 0
+        for uid, u in todos.items():
+            enviar(int(uid), msg_texto)
+            enviados += 1
+            time.sleep(0.3)
+        enviar(chat_id, f"✅ Mensagem enviada para *{enviados}* usuário(s) no total.")
+        return
+
+    # /campanha — botão "Começar monitoramento" para pendentes
+    if texto == "/campanha":
+        markup = {"inline_keyboard": [[
+            {"text": "🚀 Começar monitoramento", "callback_data": "campanha_iniciar"}
+        ]]}
+        enviados = 0
+        for uid, u in todos.items():
+            if u.get("status") == "aguardando_pagamento":
+                enviar(int(uid),
+                    "✈️ *Ainda não começou a monitorar suas passagens?*\n\n"
+                    "Receba alertas de queda de preço e análise completa do melhor momento para comprar.\n\n"
+                    "👇 Clique para começar:",
+                    reply_markup=markup
+                )
+                enviados += 1
+                time.sleep(0.3)
+        enviar(chat_id, f"✅ Campanha enviada para *{enviados}* pendente(s).")
+        return
+
+    # /img_broadcast — envia imagem para grupos
+    # Uso: encaminhe uma imagem para o bot com legenda: /img_broadcast ativos|pendentes|todos [texto]
+    if texto.startswith("/img_broadcast"):
+        enviar(chat_id,
+            "📸 Para enviar imagem, encaminhe a foto para mim com a legenda:\n\n"
+            "`/img ativos Texto opcional`\n"
+            "`/img pendentes Texto opcional`\n"
+            "`/img todos Texto opcional`\n"
+            "`/img_user <id> Texto opcional`"
+        )
         return
 
     if texto.startswith("/msg "):
@@ -426,6 +492,59 @@ def _processar_admin(chat_id, texto, nome, dados):
         enviar(chat_id, f"✅ Mensagem enviada para *{nome_alvo}* (`{alvo}`).")
         return
 
+    # Envio de imagem pelo admin via legenda
+    if msg_obj and msg_obj.get("photo") and is_admin(chat_id):
+        legenda = (msg_obj.get("caption") or "").strip()
+        file_id = msg_obj["photo"][-1]["file_id"]
+
+        def _enviar_foto_grupo(filtro, caption_extra):
+            enviados = 0
+            for uid, u in todos.items():
+                incluir = (
+                    (filtro == "ativos"    and u.get("status") == "ativo") or
+                    (filtro == "pendentes" and u.get("status") == "aguardando_pagamento") or
+                    (filtro == "todos")
+                )
+                if incluir:
+                    from telegram.bot import encaminhar_foto_para_admin
+                    url = f"https://api.telegram.org/bot{__import__('config').TELEGRAM_TOKEN}/sendPhoto"
+                    import requests as _req
+                    _req.post(url, json={
+                        "chat_id": uid,
+                        "photo":   file_id,
+                        "caption": caption_extra or "",
+                        "parse_mode": "Markdown",
+                    }, timeout=15)
+                    enviados += 1
+                    time.sleep(0.3)
+            return enviados
+
+        if legenda.startswith("/img "):
+            partes  = legenda.split(" ", 2)
+            filtro  = partes[1].lower() if len(partes) > 1 else ""
+            caption = partes[2] if len(partes) > 2 else ""
+            if filtro not in ("ativos", "pendentes", "todos"):
+                enviar(chat_id, "❌ Use: `/img ativos|pendentes|todos [texto]`"); return
+            n = _enviar_foto_grupo(filtro, caption)
+            enviar(chat_id, f"✅ Imagem enviada para *{n}* usuário(s) ({filtro}).")
+            return
+
+        if legenda.startswith("/img_user "):
+            partes  = legenda.split(" ", 2)
+            alvo    = partes[1] if len(partes) > 1 else ""
+            caption = partes[2] if len(partes) > 2 else ""
+            import requests as _req
+            _req.post(
+                f"https://api.telegram.org/bot{__import__('config').TELEGRAM_TOKEN}/sendPhoto",
+                json={"chat_id": alvo, "photo": file_id,
+                      "caption": caption, "parse_mode": "Markdown"},
+                timeout=15
+            )
+            nome_alvo = (carregar_usuario(alvo) or {}).get("nome", alvo)
+            enviar(chat_id, f"✅ Imagem enviada para *{nome_alvo}* (`{alvo}`).")
+            return
+
+    # Callback campanha_iniciar
     if texto in ("/start", "/ajuda", "/help"):
         enviar(chat_id, T.ADMIN_MENU.format(chat_id=chat_id))
 
