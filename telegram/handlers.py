@@ -291,7 +291,10 @@ def _processar_navegacao(chat_id, callback_data, dados, nome, status):
             enviar(chat_id, T.SETUP_DATA_MANUAL_IDA if prefixo == "ida" else T.SETUP_DATA_MANUAL_VOLTA); return
         if acao == "semvolta":
             dados["config"]["data_volta"] = None
-            dados["status"] = "ativo"
+            dados["status"]           = "ativo"
+            dados["historico"]        = {}
+            dados["historico_precos"] = {}
+            dados["proxima_busca"]    = None
             salvar_usuario(chat_id, dados)
             _finalizar_setup(chat_id, dados, nome); return
         if acao == "mes":
@@ -322,7 +325,10 @@ def _processar_navegacao(chat_id, callback_data, dados, nome, status):
                     enviar(chat_id, "❌ Volta deve ser depois da ida.",
                            reply_markup=teclado_data("volta")); return
                 dados["config"]["data_volta"] = valor
-                dados["status"] = "ativo"
+                dados["status"]           = "ativo"
+                dados["historico"]        = {}
+                dados["historico_precos"] = {}
+                dados["proxima_busca"]    = None
                 salvar_usuario(chat_id, dados)
                 _finalizar_setup(chat_id, dados, nome)
             return
@@ -629,9 +635,11 @@ def _processar_usuario(chat_id, texto, dados, nome, status, msg_obj=None):
         return
 
     if texto == "/reconfigurar" and status == "ativo":
-        dados["status"]    = "setup_origem"
-        dados["config"]    = {}
-        dados["historico"] = {}
+        dados["status"]           = "setup_origem"
+        dados["config"]           = {}
+        dados["historico"]        = {}
+        dados["historico_precos"] = {}  # zera seq_alta e preco_anterior da rota antiga
+        dados["proxima_busca"]    = None
         salvar_usuario(chat_id, dados)
         enviar(chat_id, T.RECONFIGURAR_INICIO, reply_markup=teclado_paises("ori"))
         return

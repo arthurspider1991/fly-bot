@@ -100,35 +100,66 @@ def buscar_preco_e_historico(
             page = context.new_page()
             log.info(f"  Flights: {origem}->{destino} {data_iso}")
             page.goto(url, timeout=50000)
-            page.wait_for_timeout(12000)
+
+            # Aguarda a seção "Melhor opção" ou "Menores preços" carregar
+            try:
+                page.wait_for_selector(
+                    "div[class*='best-flights'], div[class*='cheapest'], "
+                    "div[jsname='IWWDBc'], div[jsname='YdtKid'], "
+                    "ul.Rk10dc, li[data-id]",
+                    timeout=20000
+                )
+            except Exception:
+                page.wait_for_timeout(12000)
+
             try:
                 page.keyboard.press("Escape")
-                page.wait_for_timeout(800)
+                page.wait_for_timeout(500)
             except Exception:
                 pass
 
             # ── Preço atual ──────────────────────────────────────────────────
+            # Estratégia em camadas — do mais específico para o mais genérico
             prices = []
-            for el in page.query_selector_all("span"):
+
+            # Camada 1: aria-label dos cards de voo (mais confiável)
+            for el in page.query_selector_all("[aria-label*='R']"):
                 try:
-                    txt = el.inner_text().strip()
-                    if "R$" in txt:
-                        v = _parse_brl(txt)
+                    label = el.get_attribute("aria-label") or ""
+                    for match in re.findall(r"R\$\s*[\d.,]+", label):
+                        v = _parse_brl(match)
                         if v:
                             prices.append(v)
                 except Exception:
                     pass
+
+            # Camada 2: spans dentro dos cards de resultado
             if not prices:
-                for el in page.query_selector_all("div[class*='price'],div[class*='Price']"):
+                for el in page.query_selector_all("li[data-id] span, ul.Rk10dc li span"):
                     try:
-                        v = _parse_brl(el.inner_text().strip())
-                        if v:
-                            prices.append(v)
+                        txt = el.inner_text().strip()
+                        if "R$" in txt and len(txt) < 20:
+                            v = _parse_brl(txt)
+                            if v:
+                                prices.append(v)
                     except Exception:
                         pass
+
+            # Camada 3: qualquer span com R$ (fallback)
+            if not prices:
+                for el in page.query_selector_all("span"):
+                    try:
+                        txt = el.inner_text().strip()
+                        if txt.startswith("R$") and len(txt) < 15:
+                            v = _parse_brl(txt)
+                            if v and v >= 200:
+                                prices.append(v)
+                    except Exception:
+                        pass
+
             if prices:
                 preco = sorted(set(prices))[0]
-                log.info(f"  Preco: R$ {preco:.2f}")
+                log.info(f"  Preco: R$ {preco:.2f} ({len(prices)} candidatos)")
 
             # ── Histórico 60 dias ────────────────────────────────────────────
             try:
