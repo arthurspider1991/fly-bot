@@ -13,7 +13,7 @@ from typing import Optional
 
 from config import ALERTA_PERCENT, SLOTS_MANHA, ADMIN_CHAT_ID, get_logger
 from db.usuarios import carregar_usuario, salvar_usuario, carregar_todos_usuarios
-from services.scraper import buscar_preco_e_historico, buscar_preco_apenas, link_flights
+from services.scraper import buscar_preco_e_historico, buscar_preco_apenas, link_flights, buscar_historico_apenas
 from services.analise import analisar_historico, checar_alertas_especiais
 
 log = get_logger(__name__)
@@ -88,7 +88,10 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
 
     # ── Busca de preço ────────────────────────────────────────────────────────
     if modo in ("completo", "manha"):
-        preco_ida, hist60_ida = buscar_preco_e_historico(origem, destino, data_ida)
+        # Preço via Kayak
+        preco_ida = buscar_preco_apenas(origem, destino, data_ida)
+        # Histórico via Google (separado do preço)
+        hist60_ida = buscar_historico_apenas(origem, destino, data_ida)
     else:
         preco_ida  = buscar_preco_apenas(origem, destino, data_ida)
         hist60_ida = []
@@ -97,7 +100,8 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
     hist60_volta = []
     if data_volta:
         if modo in ("completo", "manha"):
-            preco_volta, hist60_volta = buscar_preco_e_historico(destino, origem, data_volta)
+            preco_volta = buscar_preco_apenas(destino, origem, data_volta)
+            hist60_volta = buscar_historico_apenas(destino, origem, data_volta)
         else:
             preco_volta = buscar_preco_apenas(destino, origem, data_volta)
 

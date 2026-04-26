@@ -1,10 +1,8 @@
 """
-services/scraper.py — Busca de preços via Playwright + Google Flights.
+services/scraper.py — Preço via Kayak + Histórico via Google Flights.
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-
-
 
 import base64
 import re
@@ -16,10 +14,12 @@ from config import get_logger
 log = get_logger(__name__)
 
 
-# ── URL builder ───────────────────────────────────────────────────────────────
+# ── URLs ──────────────────────────────────────────────────────────────────────
+
+def url_kayak(origem: str, destino: str, data_iso: str) -> str:
+    return f"https://www.kayak.com.br/flights/{origem}-{destino}/{data_iso}?sort=price_a"
 
 def _gerar_tfs(origem: str, destino: str, data_iso: str) -> str:
-    """Gera o parâmetro tfs (protobuf base64) para URL do Google Flights one-way."""
     ori   = origem.encode()
     dst   = destino.encode()
     dat   = data_iso.encode()
@@ -31,17 +31,15 @@ def _gerar_tfs(origem: str, destino: str, data_iso: str) -> str:
     wrapper = b'\x08\x1c\x10\x02\x1a' + bytes([len(inner)]) + inner
     return base64.urlsafe_b64encode(wrapper).decode().rstrip("=")
 
-
-def url_flights(origem: str, destino: str, data_iso: str) -> str:
+def url_google(origem: str, destino: str, data_iso: str) -> str:
     tfs = _gerar_tfs(origem, destino, data_iso)
     return f"https://www.google.com/travel/flights/search?tfs={tfs}&hl=pt-BR&gl=BR&curr=BRL"
 
-
 def link_flights(origem: str, destino: str, data_iso: str) -> str:
-    return f"[🔍 Ver passagens disponíveis]({url_flights(origem, destino, data_iso)})"
+    return f"[🔍 Ver passagens disponíveis]({url_kayak(origem, destino, data_iso)})"
 
 
-# ── Parser de preço BRL ───────────────────────────────────────────────────────
+# ── Parser BRL ────────────────────────────────────────────────────────────────
 
 def _parse_brl(txt: str) -> Optional[float]:
     try:
@@ -55,7 +53,7 @@ def _parse_brl(txt: str) -> Optional[float]:
         return None
 
 
-# ── Browser context ───────────────────────────────────────────────────────────
+# ── Browser ───────────────────────────────────────────────────────────────────
 
 def _novo_browser_context(p):
     browser = p.chromium.launch(
@@ -78,161 +76,163 @@ def _novo_browser_context(p):
     return browser, context
 
 
-# ── Busca principal ───────────────────────────────────────────────────────────
+# ── Preço via Kayak ───────────────────────────────────────────────────────────
+
+def _buscar_preco_kayak(page, origem: str, destino: str, data_iso: str) -> Optional[float]:
+    url = url_kayak(origem, destino, data_iso)
+    log.info(f"  Kayak: {origem}->{destino} {data_iso}")
+    page.goto(url, timeout=50000)
+
+    for sel in ["button:has-text('Aceitar')", "button:has-text('Accept')", "#onetrust-accept-btn-handler"]:
+        try:
+            el = page.query_selector(sel)
+            if el and el.is_visible():
+                el.click()
+                page.wait_for_timeout(1000)
+                break
+        except Exception:
+            pass
+
+    preco_ant = None
+    estavel   = 0
+    for t in range(40):
+        page.wait_for_timeout(1000)
+        try:
+            spans = page.evaluate(
+                "() => Array.from(document.querySelectorAll('*'))"
+                ".filter(e => !e.children.length)"
+                ".map(e => (e.innerText || '').trim())"
+                ".filter(t => t.startsWith('R$') && t.length < 15)"
+            )
+            precos = [v for s in spans for v in [_parse_brl(s)] if v]
+            menor  = min(precos) if precos else None
+        except Exception:
+            menor = None
+
+        if menor:
+            log.info(f"  [{t+1}s] Kayak: R$ {menor:.0f}")
+            if menor == preco_ant:
+                estavel += 1
+                if estavel >= 4:
+                    log.info(f"  Kayak estável: R$ {menor:.0f}")
+                    return menor
+            else:
+                estavel   = 0
+                preco_ant = menor
+
+    return preco_ant
+
+
+# ── Histórico via Google Flights ──────────────────────────────────────────────
+
+def _buscar_historico_google(page, origem: str, destino: str, data_iso: str) -> list:
+    url = url_google(origem, destino, data_iso)
+    log.info(f"  Google histórico: {origem}->{destino} {data_iso}")
+    try:
+        page.goto(url, timeout=50000)
+        try:
+            page.wait_for_selector("ul.Rk10dc", timeout=20000)
+        except Exception:
+            page.wait_for_timeout(20000)
+
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(500)
+        except Exception:
+            pass
+
+        # Aguarda mais um pouco para garantir que os botões carregaram
+        page.wait_for_timeout(3000)
+
+        btn_el = None
+        for frame in [page] + list(page.frames):
+            try:
+                handle = frame.evaluate_handle("""
+                    () => {
+                        const botoes = document.querySelectorAll('button[aria-label]');
+                        for (const b of botoes) {
+                            const l = (b.getAttribute('aria-label') || '').toLowerCase();
+                            if ((l.includes('hist') && l.includes('pre')) ||
+                                l.includes('price history') ||
+                                l === 'ver histórico de preços') {
+                                return b;
+                            }
+                        }
+                        return null;
+                    }
+                """)
+                el = handle.as_element() if handle else None
+                if el:
+                    btn_el = el
+                    break
+            except Exception:
+                continue
+
+        if not btn_el:
+            log.warning("  Histórico: botão não encontrado")
+            return []
+
+        btn_el.scroll_into_view_if_needed()
+        page.wait_for_timeout(500)
+        btn_el.click()
+        log.info("  Histórico: clicado, aguardando SVG...")
+        page.wait_for_timeout(10000)
+
+        hoje = date.today()
+        temp = []
+        for el in page.query_selector_all("[aria-label]"):
+            try:
+                label = (
+                    (el.get_attribute("aria-label") or "")
+                    .replace("\xa0", " ").replace("\u202f", " ")
+                    .replace("\u00a0", " ").strip()
+                )
+                m = re.match(r"H[aá] (\d+) dias? - R\$ ([\d.]+)", label)
+                if m:
+                    dias_atras = int(m.group(1))
+                    preco      = int(m.group(2).replace(".", ""))
+                    temp.append({
+                        "dias_atras": dias_atras,
+                        "preco":      preco,
+                        "data":       (hoje - timedelta(days=dias_atras)).isoformat(),
+                    })
+                elif label.startswith("Hoje") and "R$" in label:
+                    m2 = re.search(r"R\$ ([\d.]+)", label)
+                    if m2:
+                        temp.append({
+                            "dias_atras": 0,
+                            "preco":      int(m2.group(1).replace(".", "")),
+                            "data":       hoje.isoformat(),
+                        })
+            except Exception:
+                continue
+
+        log.info(f"  Histórico: {len(temp)} pontos")
+        if len(temp) >= 10:
+            return sorted(temp, key=lambda x: x["dias_atras"], reverse=True)
+
+    except Exception as e:
+        log.warning(f"  Histórico indisponível: {e}")
+
+    return []
+
+
+# ── Funções públicas ──────────────────────────────────────────────────────────
 
 def buscar_preco_e_historico(
     origem: str, destino: str, data_iso: str
 ) -> Tuple[Optional[float], list]:
-    """
-    Abre o Google Flights UMA vez e retorna:
-      preco    : float ou None  (menor preço atual)
-      historico: list de dicts {dias_atras, preco, data} ou []
-    """
+    """Preço via Kayak + histórico via Google Flights."""
     from playwright.sync_api import sync_playwright
 
-    url   = url_flights(origem, destino, data_iso)
     preco = None
     hist  = []
-
     try:
         with sync_playwright() as p:
             browser, context = _novo_browser_context(p)
             page = context.new_page()
-            log.info(f"  Flights: {origem}->{destino} {data_iso}")
-            page.goto(url, timeout=50000)
-
-            # Aguarda a seção "Melhor opção" ou "Menores preços" carregar
-            try:
-                page.wait_for_selector(
-                    "div[class*='best-flights'], div[class*='cheapest'], "
-                    "div[jsname='IWWDBc'], div[jsname='YdtKid'], "
-                    "ul.Rk10dc, li[data-id]",
-                    timeout=20000
-                )
-            except Exception:
-                page.wait_for_timeout(12000)
-
-            try:
-                page.keyboard.press("Escape")
-                page.wait_for_timeout(500)
-            except Exception:
-                pass
-
-            # ── Preço atual ──────────────────────────────────────────────────
-            # Estratégia em camadas — do mais específico para o mais genérico
-            prices = []
-
-            # Camada 1: aria-label dos cards de voo (mais confiável)
-            for el in page.query_selector_all("[aria-label*='R']"):
-                try:
-                    label = el.get_attribute("aria-label") or ""
-                    for match in re.findall(r"R\$\s*[\d.,]+", label):
-                        v = _parse_brl(match)
-                        if v:
-                            prices.append(v)
-                except Exception:
-                    pass
-
-            # Camada 2: spans dentro dos cards de resultado
-            if not prices:
-                for el in page.query_selector_all("li[data-id] span, ul.Rk10dc li span"):
-                    try:
-                        txt = el.inner_text().strip()
-                        if "R$" in txt and len(txt) < 20:
-                            v = _parse_brl(txt)
-                            if v:
-                                prices.append(v)
-                    except Exception:
-                        pass
-
-            # Camada 3: qualquer span com R$ (fallback)
-            if not prices:
-                for el in page.query_selector_all("span"):
-                    try:
-                        txt = el.inner_text().strip()
-                        if txt.startswith("R$") and len(txt) < 15:
-                            v = _parse_brl(txt)
-                            if v and v >= 200:
-                                prices.append(v)
-                    except Exception:
-                        pass
-
-            if prices:
-                preco = sorted(set(prices))[0]
-                log.info(f"  Preco: R$ {preco:.2f} ({len(prices)} candidatos)")
-
-            # ── Histórico 60 dias ────────────────────────────────────────────
-            try:
-                btn_el = None
-                for frame in [page] + list(page.frames):
-                    try:
-                        handle = frame.evaluate_handle("""
-                            () => {
-                                const botoes = document.querySelectorAll('button[aria-label]');
-                                for (const b of botoes) {
-                                    const l = (b.getAttribute('aria-label') || '').toLowerCase();
-                                    if ((l.includes('hist') && l.includes('pre')) ||
-                                        l.includes('price history') ||
-                                        l === 'ver histórico de preços') {
-                                        return b;
-                                    }
-                                }
-                                return null;
-                            }
-                        """)
-                        el = handle.as_element() if handle else None
-                        if el:
-                            btn_el = el
-                            log.info(f"  Historico: botão no frame {frame.url[:50]}")
-                            break
-                    except Exception:
-                        continue
-
-                if btn_el:
-                    btn_el.scroll_into_view_if_needed()
-                    page.wait_for_timeout(500)
-                    btn_el.click()
-                    log.info("  Historico: clicado, aguardando SVG...")
-                    page.wait_for_timeout(5000)
-
-                    hoje = date.today()
-                    temp = []
-                    aria_els = page.query_selector_all("[aria-label]")
-                    for el in aria_els:
-                        try:
-                            label = (
-                                (el.get_attribute("aria-label") or "")
-                                .replace("\xa0", " ").replace("\u202f", " ")
-                                .replace("\u00a0", " ").strip()
-                            )
-                            m = re.match(r"H[aá] (\d+) dias? - R\$ ([\d.]+)", label)
-                            if m:
-                                dias_atras = int(m.group(1))
-                                p          = int(m.group(2).replace(".", ""))
-                                temp.append({
-                                    "dias_atras": dias_atras,
-                                    "preco":      p,
-                                    "data":       (hoje - timedelta(days=dias_atras)).isoformat(),
-                                })
-                            elif label.startswith("Hoje") and "R$" in label:
-                                m2 = re.search(r"R\$ ([\d.]+)", label)
-                                if m2:
-                                    temp.append({
-                                        "dias_atras": 0,
-                                        "preco":      int(m2.group(1).replace(".", "")),
-                                        "data":       hoje.isoformat(),
-                                    })
-                        except Exception:
-                            continue
-
-                    log.info(f"  Historico: {len(temp)} pontos")
-                    if len(temp) >= 10:
-                        hist = sorted(temp, key=lambda x: x["dias_atras"], reverse=True)
-                else:
-                    log.warning("  Historico: botão não encontrado")
-            except Exception as e:
-                log.warning(f"  Historico indisponível: {e}")
-
+            preco = _buscar_preco_kayak(page, origem, destino, data_iso)
+            hist  = _buscar_historico_google(page, origem, destino, data_iso)
             browser.close()
     except Exception as e:
         log.error(f"  Playwright erro: {e}")
@@ -241,10 +241,7 @@ def buscar_preco_e_historico(
 
 
 def buscar_preco_apenas(origem: str, destino: str, data_iso: str) -> Optional[float]:
-    """
-    Versão rápida com cache — usada no ciclo de 2h.
-    Não busca histórico para economizar tempo.
-    """
+    """Versão rápida com cache — ciclo de 2h, só Kayak."""
     from db.cache import chave_rota, get_cache, set_cache
 
     chave  = chave_rota(origem, destino, data_iso)
@@ -252,6 +249,30 @@ def buscar_preco_apenas(origem: str, destino: str, data_iso: str) -> Optional[fl
     if cached is not None:
         return cached
 
-    preco, _ = buscar_preco_e_historico(origem, destino, data_iso)
+    from playwright.sync_api import sync_playwright
+    preco = None
+    try:
+        with sync_playwright() as p:
+            browser, context = _novo_browser_context(p)
+            page = context.new_page()
+            preco = _buscar_preco_kayak(page, origem, destino, data_iso)
+            browser.close()
+    except Exception as e:
+        log.error(f"  Playwright erro: {e}")
+
     set_cache(chave, preco)
     return preco
+
+def buscar_historico_apenas(origem: str, destino: str, data_iso: str) -> list:
+    """Busca só o histórico de 60 dias via Google Flights, sem preço."""
+    from playwright.sync_api import sync_playwright
+    hist = []
+    try:
+        with sync_playwright() as p:
+            browser, context = _novo_browser_context(p)
+            page = context.new_page()
+            hist = _buscar_historico_google(page, origem, destino, data_iso)
+            browser.close()
+    except Exception as e:
+        log.error(f"  Playwright erro histórico: {e}")
+    return hist

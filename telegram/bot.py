@@ -24,7 +24,7 @@ def enviar(chat_id, texto: str, reply_markup=None):
         "chat_id":                  chat_id,
         "text":                     texto,
         "parse_mode":               "Markdown",
-        "disable_web_page_preview": False,
+        "disable_web_page_preview": True,
     }
     if reply_markup:
         payload["reply_markup"] = json.dumps(reply_markup)
