@@ -78,7 +78,7 @@ def _novo_browser_context(p):
 
 # ── Preço via Kayak ───────────────────────────────────────────────────────────
 
-def _buscar_preco_kayak(page, origem: str, destino: str, data_iso: str) -> Optional[float]:
+def _buscar_preco_kayak(page, origem: str, destino: str, data_iso: str):
     url = url_kayak(origem, destino, data_iso)
     log.info(f"  Kayak: {origem}->{destino} {data_iso}")
     page.goto(url, timeout=50000)
@@ -98,13 +98,21 @@ def _buscar_preco_kayak(page, origem: str, destino: str, data_iso: str) -> Optio
     for t in range(40):
         page.wait_for_timeout(1000)
         try:
-            spans = page.evaluate(
-                "() => Array.from(document.querySelectorAll('*'))"
-                ".filter(e => !e.children.length)"
-                ".map(e => (e.innerText || '').trim())"
-                ".filter(t => t.startsWith('R$') && t.length < 15)"
-            )
-            precos = [v for s in spans for v in [_parse_brl(s)] if v]
+            precos_raw = page.evaluate("""
+                () => {
+                    const result = [];
+                    const els = document.querySelectorAll('div.e2GB-price-text');
+                    for (const el of els) {
+                        const txt = (el.innerText || '').trim();
+                        if (!txt.startsWith('R$') || txt.length > 15) continue;
+                        const rect = el.getBoundingClientRect();
+                        if (rect.width === 0 || rect.height === 0) continue;
+                        result.push(txt);
+                    }
+                    return result;
+                }
+            """)
+            precos = [v for s in precos_raw for v in [_parse_brl(s)] if v]
             menor  = min(precos) if precos else None
         except Exception:
             menor = None
@@ -115,12 +123,34 @@ def _buscar_preco_kayak(page, origem: str, destino: str, data_iso: str) -> Optio
                 estavel += 1
                 if estavel >= 4:
                     log.info(f"  Kayak estável: R$ {menor:.0f}")
-                    return menor
+                    break
             else:
                 estavel   = 0
                 preco_ant = menor
 
-    return preco_ant
+    # Captura aeroporto alternativo (card rVsP)
+    alternativo = None
+    try:
+        alt = page.evaluate("""
+            () => {
+                const card = document.querySelector('div.rVsP-price-display, span.rVsP-price-display');
+                if (!card) return null;
+                const preco = (card.innerText || '').trim();
+                // Pega o texto descritivo do card (aeroporto e distância)
+                const container = card.closest('[class*="rVsP"]') || card.parentElement;
+                const desc = container ? (container.innerText || '').replace(preco, '').trim() : '';
+                return {preco: preco, desc: desc.substring(0, 100)};
+            }
+        """)
+        if alt and alt.get('preco'):
+            v = _parse_brl(alt['preco'])
+            if v:
+                alternativo = {'preco': v, 'desc': alt.get('desc', '')}
+                log.info(f"  Alternativo: R$ {v:.0f} — {alt.get('desc','')[:50]}")
+    except Exception as e:
+        log.warning(f"  Alternativo: {e}")
+
+    return preco_ant, alternativo
 
 
 # ── Histórico via Google Flights ──────────────────────────────────────────────
@@ -231,13 +261,14 @@ def buscar_preco_e_historico(
         with sync_playwright() as p:
             browser, context = _novo_browser_context(p)
             page = context.new_page()
-            preco = _buscar_preco_kayak(page, origem, destino, data_iso)
+            resultado = _buscar_preco_kayak(page, origem, destino, data_iso)
+            preco, alt = resultado if isinstance(resultado, tuple) else (resultado, None)
             hist  = _buscar_historico_google(page, origem, destino, data_iso)
             browser.close()
     except Exception as e:
         log.error(f"  Playwright erro: {e}")
 
-    return preco, hist
+    return preco, hist, alt if 'alt' in dir() else None
 
 
 def buscar_preco_apenas(origem: str, destino: str, data_iso: str) -> Optional[float]:
@@ -255,7 +286,8 @@ def buscar_preco_apenas(origem: str, destino: str, data_iso: str) -> Optional[fl
         with sync_playwright() as p:
             browser, context = _novo_browser_context(p)
             page = context.new_page()
-            preco = _buscar_preco_kayak(page, origem, destino, data_iso)
+            resultado = _buscar_preco_kayak(page, origem, destino, data_iso)
+            preco, _ = resultado if isinstance(resultado, tuple) else (resultado, None)
             browser.close()
     except Exception as e:
         log.error(f"  Playwright erro: {e}")

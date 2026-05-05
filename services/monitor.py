@@ -87,11 +87,11 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
     now_str = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     # ── Busca de preço ────────────────────────────────────────────────────────
+    alt_ida   = None
+    alt_volta = None
+
     if modo in ("completo", "manha"):
-        # Preço via Kayak
-        preco_ida = buscar_preco_apenas(origem, destino, data_ida)
-        # Histórico via Google (separado do preço)
-        hist60_ida = buscar_historico_apenas(origem, destino, data_ida)
+        preco_ida, hist60_ida, alt_ida = buscar_preco_e_historico(origem, destino, data_ida)
     else:
         preco_ida  = buscar_preco_apenas(origem, destino, data_ida)
         hist60_ida = []
@@ -100,8 +100,7 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
     hist60_volta = []
     if data_volta:
         if modo in ("completo", "manha"):
-            preco_volta = buscar_preco_apenas(destino, origem, data_volta)
-            hist60_volta = buscar_historico_apenas(destino, origem, data_volta)
+            preco_volta, hist60_volta, alt_volta = buscar_preco_e_historico(destino, origem, data_volta)
         else:
             preco_volta = buscar_preco_apenas(destino, origem, data_volta)
 
@@ -176,6 +175,27 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
         else:
             ant = hist_dados.get("preco_volta")
             linhas.append(f"↩️ Volta: R$ {ant:.0f} _(último conhecido)_" if ant else "↩️ Volta: ⚠️ sem dados")
+
+    # Aeroporto alternativo ida
+    if alt_ida and alt_ida.get('preco') and preco_ida:
+        economia = preco_ida - alt_ida['preco']
+        if economia > 0:
+            desc = alt_ida.get('desc', '')
+            # Extrai nome do aeroporto alternativo da descrição
+            import re as _re
+            aeroporto_alt = _re.search(r'([A-Z]{3})', desc)
+            aeroporto_alt = aeroporto_alt.group(1) if aeroporto_alt else "aeroporto alternativo"
+            linhas.append(f"🔀 *Opção mais barata pelo aeroporto {aeroporto_alt}:* R$ {alt_ida['preco']:.0f} _(economia de R$ {economia:.0f})_")
+
+    # Aeroporto alternativo volta
+    if alt_volta and alt_volta.get('preco') and preco_volta:
+        economia = preco_volta - alt_volta['preco']
+        if economia > 0:
+            desc = alt_volta.get('desc', '')
+            import re as _re
+            aeroporto_alt = _re.search(r'([A-Z]{3})', desc)
+            aeroporto_alt = aeroporto_alt.group(1) if aeroporto_alt else "aeroporto alternativo"
+            linhas.append(f"🔀 *Opção mais barata volta pelo {aeroporto_alt}:* R$ {alt_volta['preco']:.0f} _(economia de R$ {economia:.0f})_")
 
     linhas.append("")
     linhas.append(f"💡 Se acha que esse valor é ideal, compre agora:")
