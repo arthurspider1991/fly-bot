@@ -94,3 +94,29 @@ def deletar_usuario(chat_id) -> None:
         conn.execute("DELETE FROM usuarios WHERE chat_id = ?", (chat_id,))
         conn.commit()
         conn.close()
+
+
+# ── Leads internacionais ───────────────────────────────────────────────────────
+
+def salvar_lead_internacional(chat_id, nome, origem, destino):
+    from datetime import datetime
+    with _lock:
+        conn = get_conn()
+        conn.execute("""
+            INSERT INTO leads_internacionais (chat_id, nome, origem, destino, criado_em)
+            VALUES (?, ?, ?, ?, ?)
+        """, (str(chat_id), nome, origem, destino, datetime.now().isoformat()))
+        conn.commit()
+        conn.close()
+
+
+def listar_leads_internacionais():
+    with _lock:
+        conn = get_conn()
+        rows = conn.execute("""
+            SELECT chat_id, nome, origem, destino, criado_em
+            FROM leads_internacionais
+            ORDER BY criado_em DESC
+        """).fetchall()
+        conn.close()
+    return [dict(r) for r in rows]

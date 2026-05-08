@@ -12,7 +12,7 @@ from datetime import datetime, date, timedelta
 
 import textos as T
 from config import ADMIN_CHAT_ID, PIX_KEY_1MES, PIX_KEY_5MESES, PIX_VALOR_1MES, PIX_VALOR_5MESES, get_logger
-from db.usuarios import carregar_usuario, salvar_usuario, carregar_todos_usuarios
+from db.usuarios import carregar_usuario, salvar_usuario, carregar_todos_usuarios, salvar_lead_internacional, listar_leads_internacionais
 from telegram.bot import (
     enviar, encaminhar_foto_para_admin, encaminhar_documento_para_admin,
     editar_mensagem_markup, is_admin,
@@ -77,7 +77,7 @@ def msg_boas_vindas(nome: str) -> str:
 
 def msg_pix(plano: str) -> str:
     pix_key, pix_valor = pix_info(plano)
-    label = "1 mês" if plano == "1mes" else "5 meses"
+    label = "1 mês" if plano == "1mes" else "3 meses"
     return (
         f"✅ *Plano {label} selecionado!*\n\n"
         f"💰 Valor: *{pix_valor}*\n\n"
@@ -167,6 +167,21 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
             enviar(int(alvo), T.SETUP_LIBERADO, reply_markup=teclado_paises("ori"))
             if msg_obj and msg_obj.get("message_id"):
                 editar_mensagem_markup(chat_id, msg_obj["message_id"])
+            return
+
+        # Voos internacionais
+        if callback_data == "internacional":
+            dados["status"] = "lead_internacional"
+            salvar_usuario(chat_id, dados)
+            enviar(chat_id,
+                "🌍 *Voos internacionais*\n\n"
+                "Este bot é especializado em voos dentro da América do Sul.\n\n"
+                "Mas estamos trabalhando para expandir! Me conta sua rota e "
+                "você será um dos primeiros avisados quando lançarmos:\n\n"
+                "✏️ Digite sua rota no formato:\n"
+                "`Cidade de origem → Cidade de destino`\n\n"
+                "Ex: `São Paulo → Lisboa`"
+            )
             return
 
         # Campanha — botão "Começar monitoramento"
@@ -384,6 +399,18 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
         enviar(chat_id, "\n".join(linhas))
         return
 
+    if texto.startswith("/leads"):
+        leads = listar_leads_internacionais()
+        if not leads:
+            enviar(chat_id, "Nenhum lead internacional ainda.")
+            return
+        linhas = [f"🌍 *Leads internacionais ({len(leads)}):*\n"]
+        for l in leads:
+            data = l['criado_em'][:10] if l.get('criado_em') else '?'
+            linhas.append(f"• {l['nome']} (`{l['chat_id']}`) — {l['destino']} — {data}")
+        enviar(chat_id, "\n".join(linhas))
+        return
+
     if texto.startswith("/vencendo"):
         vencendo = [
             (dias_restantes_assinatura(u), uid, u.get("nome", "?"))
@@ -579,7 +606,7 @@ def _processar_comprovante(chat_id, msg_obj, dados, nome, status):
     salvar_usuario(chat_id, dados)
 
     plano    = dados.get("plano", "1mes")
-    label    = "1 mês" if plano == "1mes" else "5 meses"
+    label    = "1 mês" if plano == "1mes" else "3 meses"
     tipo_msg = "🔄 RENOVAÇÃO" if era_renovacao else "💸 NOVO PAGAMENTO"
     caption  = (
         f"{tipo_msg}\n\n"
@@ -678,6 +705,29 @@ def _processar_usuario(chat_id, texto, dados, nome, status, msg_obj=None):
         return
 
     # /suporte e /fechar disponíveis em QUALQUER status
+    # Lead internacional — aguarda texto com rota
+    if status == "lead_internacional" and texto and not texto.startswith("/"):
+        rota = texto.strip()
+        # Salva no banco
+        salvar_lead_internacional(chat_id, nome, "", rota)
+        # Volta para aguardando pagamento
+        dados["status"] = "aguardando_pagamento"
+        salvar_usuario(chat_id, dados)
+        enviar(chat_id,
+            "✅ *Anotado!*\n\n"
+            f"Rota registrada: *{rota}*\n\n"
+            "Você será um dos primeiros avisados quando lançarmos "
+            "o monitoramento internacional. 🌍\n\n"
+            "Enquanto isso, que tal monitorar voos dentro da América do Sul?"
+        )
+        enviar(chat_id, msg_boas_vindas(nome), reply_markup=teclado_planos())
+        enviar(ADMIN_CHAT_ID,
+            f"🌍 *Novo lead internacional*\n"
+            f"👤 {nome} (`{chat_id}`)\n"
+            f"✈️ Rota: {rota}"
+        )
+        return
+
     # Bloqueios de estado
     if status == "aguardando_pagamento":
         enviar(chat_id, msg_boas_vindas(nome), reply_markup=teclado_planos()); return

@@ -50,6 +50,16 @@ def init_db() -> None:
                 ultima_busca TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS leads_internacionais (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id    TEXT,
+                nome       TEXT,
+                origem     TEXT,
+                destino    TEXT,
+                criado_em  TEXT
+            )
+        """)
         # Migração suave: adiciona colunas caso venha de versão anterior
         for col, default in [
             ("historico_precos", "'{}'"),

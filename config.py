@@ -17,7 +17,7 @@ ADMIN_CHAT_ID   = int(os.getenv("ADMIN_CHAT_ID", "0"))
 PIX_KEY_1MES     = os.getenv("PIX_KEY_1MES",   os.getenv("PIX_KEY", ""))
 PIX_KEY_5MESES   = os.getenv("PIX_KEY_5MESES", os.getenv("PIX_KEY", ""))
 PIX_VALOR_1MES   = os.getenv("PIX_VALOR_1MES",   "R$ 14,90")
-PIX_VALOR_5MESES = os.getenv("PIX_VALOR_5MESES", "R$ 29,90")
+PIX_VALOR_5MESES = os.getenv("PIX_VALOR_5MESES", "R$ 29,90")  # 3 meses
 
 # ── Banco ─────────────────────────────────────────────────────────────────────
 DB_FILE    = os.getenv("DB_FILE", "bot.db")

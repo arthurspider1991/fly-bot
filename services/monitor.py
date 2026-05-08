@@ -34,7 +34,7 @@ def _iso_para_br(data_iso: Optional[str]) -> str:
 # ── Assinatura ────────────────────────────────────────────────────────────────
 
 def dias_plano(plano: str) -> int:
-    return 150 if plano == "5meses" else 30
+    return 90 if plano == "5meses" else 30
 
 def dias_restantes_assinatura(dados: dict) -> Optional[int]:
     liberado_em = dados.get("liberado_em")
@@ -185,7 +185,7 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
             import re as _re
             aeroporto_alt = _re.search(r'([A-Z]{3})', desc)
             aeroporto_alt = aeroporto_alt.group(1) if aeroporto_alt else "aeroporto alternativo"
-            linhas.append(f"🔀 *Opção mais barata pelo aeroporto {aeroporto_alt}:* R$ {alt_ida['preco']:.0f} _(economia de R$ {economia:.0f})_")
+            linhas.append(f"🔀 *Opção mais barata pelo {aeroporto_alt}:* R$ {alt_ida['preco']:.0f} _(economia de R$ {economia:.0f})_")
 
     # Aeroporto alternativo volta
     if alt_volta and alt_volta.get('preco') and preco_volta:
@@ -344,8 +344,8 @@ def ciclo_assinaturas() -> None:
                 f"🔴 *Assinatura expirada*\nNome: {nome}\nID: `{chat_id}`\nData: {now_str}"
             )
 
-        elif dias in (7, 3, 1):
-            emoji  = "🟡" if dias > 3 else "🔴"
+        elif 1 <= dias <= 7:
+            emoji  = "🟡" if dias > 3 else ("🟠" if dias > 1 else "🔴")
             sufixo = "s" if dias > 1 else ""
             _enviar(int(chat_id),
                 f"{emoji} *Sua assinatura vence em {dias} dia{sufixo}!*\n\n"

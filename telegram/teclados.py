@@ -14,10 +14,15 @@ from telegram.aeroportos import BRASIL_ESTADOS, BRASIL_AEROPORTOS, OUTROS_PAISES
 
 
 def teclado_planos() -> dict:
-    return {"inline_keyboard": [[
-        {"text": f"📅 1 mês — {PIX_VALOR_1MES}",     "callback_data": "plano:1mes"},
-        {"text": f"📅 5 meses — {PIX_VALOR_5MESES}", "callback_data": "plano:5meses"},
-    ]]}
+    return {"inline_keyboard": [
+        [
+            {"text": f"📅 1 mês — {PIX_VALOR_1MES}",     "callback_data": "plano:1mes"},
+            {"text": f"📅 3 meses — {PIX_VALOR_5MESES}", "callback_data": "plano:5meses"},
+        ],
+        [
+            {"text": "✈️ Voos internacionais", "callback_data": "internacional"},
+        ],
+    ]}
 
 
 def teclado_paguei() -> dict:
