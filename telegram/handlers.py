@@ -392,6 +392,27 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
         enviar(int(alvo), T.SETUP_LIBERADO, reply_markup=teclado_paises("ori"))
         return
 
+    if texto.startswith("/resetar"):
+        partes = texto.split()
+        if len(partes) < 2:
+            enviar(chat_id, "❌ Use: `/resetar <chat_id>`"); return
+        alvo       = partes[1]
+        dados_alvo = carregar_usuario(alvo)
+        if not dados_alvo:
+            enviar(chat_id, T.ADMIN_NAO_ENCONTRADO.format(chat_id=alvo)); return
+        dados_alvo["status"]           = "aguardando_pagamento"
+        dados_alvo["liberado_em"]      = None
+        dados_alvo["plano"]            = None
+        dados_alvo["config"]           = {}
+        dados_alvo["historico"]        = {}
+        dados_alvo["historico_precos"] = {}
+        dados_alvo["proxima_busca"]    = None
+        dados_alvo["slot_manha"]       = None
+        salvar_usuario(alvo, dados_alvo)
+        enviar(chat_id, f"🔄 Usuário `{alvo}` resetado para o início.")
+        enviar(int(alvo), "🔄 Sua conta foi resetada.")
+        return
+
     if texto.startswith("/bloquear"):
         partes = texto.split()
         if len(partes) < 2:
