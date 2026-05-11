@@ -35,17 +35,16 @@ def gerar_pix(chat_id: str, nome: str, plano: str) -> Optional[dict]:
     plano_info = PLANOS.get(plano, PLANOS["1mes"])
     idempotency  = str(uuid.uuid4())
 
+    webhook_url = os.getenv("MP_WEBHOOK_URL", "")
     payload = {
         "transaction_amount": plano_info["valor"],
         "description":        plano_info["descricao"],
         "payment_method_id":  "pix",
         "external_reference": f"{chat_id}:{plano}",
-        "notification_url":   os.getenv("MP_WEBHOOK_URL", ""),
+        **({"notification_url": webhook_url} if webhook_url.startswith("https://") else {}),
         "date_of_expiration": (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S.000-03:00"),
         "payer": {
-            "email":      f"user_{chat_id}@flybot.app",
-            "first_name": nome.split()[0] if nome else "Usuario",
-            "last_name":  nome.split()[-1] if len(nome.split()) > 1 else "FlyBot",
+            "email": "test_user_123@testuser.com",
         },
     }
 
