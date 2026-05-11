@@ -23,6 +23,7 @@ from telegram.teclados import (
     teclado_aeroportos_pais, teclado_data, teclado_dias,
 )
 from telegram.aeroportos import BRASIL_ESTADOS, OUTROS_PAISES, AEROPORTOS
+from services.pagamento import gerar_pix
 from services.monitor import (
     executar_ciclo_usuario, atribuir_slot_manha,
     dias_restantes_assinatura, dias_plano,
@@ -194,11 +195,32 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
             )
             return
 
-        # Escolha de plano
+        # Escolha de plano — gera QR Code Pix via Mercado Pago
         if callback_data.startswith("plano:"):
             plano          = callback_data.split(":")[1]
             dados["plano"] = plano
             salvar_usuario(chat_id, dados)
+
+            import os as _os
+            if _os.getenv("MP_ACCESS_TOKEN"):
+                # Gera Pix automático
+                enviar(chat_id, "⏳ Gerando seu Pix...")
+                pix = gerar_pix(chat_id, nome, plano)
+                if pix:
+                    label = "1 mês" if plano == "1mes" else "3 meses"
+                    enviar(chat_id,
+                        f"✅ *Pix gerado — Plano {label}*\n\n"
+                        f"💰 Valor: *R$ {pix['valor']:.2f}*\n\n"
+                        f"📋 *Código Pix (copia e cola):*\n"
+                        f"`{pix['qr_code']}`\n\n"
+                        f"⏰ Válido por {pix['expira_em']}\n\n"
+                        "_Após o pagamento, a liberação é automática!_"
+                    )
+                    # Salva payment_id para verificação
+                    dados["payment_id"] = str(pix["payment_id"])
+                    salvar_usuario(chat_id, dados)
+                    return
+            # Fallback: fluxo manual se MP não configurado
             enviar(chat_id, msg_pix(plano), reply_markup=teclado_paguei())
             return
 

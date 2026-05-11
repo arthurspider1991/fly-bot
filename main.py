@@ -22,6 +22,7 @@ from config import TELEGRAM_TOKEN, ADMIN_CHAT_ID, get_logger
 from db.database import init_db, migrar_json_para_sqlite
 from telegram.bot import enviar, loop_polling
 from services.monitor import loop_ciclos, ciclo_assinaturas
+from webhook import iniciar_em_thread as iniciar_webhook
 
 log = get_logger(__name__)
 
@@ -50,6 +51,7 @@ def main():
     )
 
     # Threads
+    iniciar_webhook()  # recebe notificações do Mercado Pago
     threading.Thread(target=loop_polling, daemon=True).start()
     threading.Thread(target=loop_ciclos,  daemon=True).start()
 
