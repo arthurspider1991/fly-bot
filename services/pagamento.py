@@ -109,23 +109,39 @@ def processar_webhook(body: dict) -> Optional[dict]:
         if body.get("type") != "payment":
             return None
 
+        # Checkout Pro notifica via merchant_order ou payment
+        tipo       = body.get("type", "")
         payment_id = body.get("data", {}).get("id")
         if not payment_id:
             return None
 
-        status = verificar_pagamento(payment_id)
-        if status != "approved":
-            log.info(f"Webhook: payment {payment_id} status={status} (ignorado)")
-            return None
-
-        # Pega external_reference = "chat_id:plano"
-        r = requests.get(
-            f"https://api.mercadopago.com/v1/payments/{payment_id}",
-            headers={"Authorization": f"Bearer {MP_ACCESS_TOKEN}"},
-            timeout=10,
-        )
-        resp       = r.json()
-        ref        = resp.get("external_reference", "")
+        # Para merchant_order, busca os pagamentos associados
+        if tipo == "merchant_order":
+            r   = requests.get(
+                f"https://api.mercadopago.com/merchant_orders/{payment_id}",
+                headers={"Authorization": f"Bearer {MP_ACCESS_TOKEN}"},
+                timeout=10,
+            )
+            order = r.json()
+            # Verifica se algum pagamento foi aprovado
+            pagamentos = order.get("payments", [])
+            aprovado   = any(p.get("status") == "approved" for p in pagamentos)
+            if not aprovado:
+                log.info(f"Webhook merchant_order {payment_id}: sem pagamento aprovado")
+                return None
+            ref = order.get("external_reference", "")
+        else:
+            status = verificar_pagamento(payment_id)
+            if status != "approved":
+                log.info(f"Webhook: payment {payment_id} status={status} (ignorado)")
+                return None
+            r = requests.get(
+                f"https://api.mercadopago.com/v1/payments/{payment_id}",
+                headers={"Authorization": f"Bearer {MP_ACCESS_TOKEN}"},
+                timeout=10,
+            )
+            resp = r.json()
+            ref  = resp.get("external_reference", "")
         partes     = ref.split(":")
         chat_id    = partes[0] if partes else ""
         plano      = partes[1] if len(partes) > 1 else "1mes"
