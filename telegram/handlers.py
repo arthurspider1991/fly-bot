@@ -207,13 +207,13 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
                 if checkout:
                     label = "1 mês" if plano == "1mes" else "3 meses"
                     markup = {"inline_keyboard": [[
-                        {"text": f"💳 Pagar R$ {checkout['valor']:.2f} — {label}",
+                        {"text": f"🔑 Pagar R$ {checkout['valor']:.2f} via Pix",
                          "url": checkout["link"]}
                     ]]}
                     enviar(chat_id,
                         f"✅ *Plano {label} — R$ {checkout['valor']:.2f}*\n\n"
-                        "Clique no botão abaixo para pagar via Pix ou cartão.\n"
-                        "_A liberação é automática após a confirmação!_",
+                        "Clique no botão abaixo e pague via *Pix*.\n"
+                        "_A liberação é automática após a confirmação!_ ✅",
                         reply_markup=markup
                     )
                     dados["preference_id"] = checkout["preference_id"]

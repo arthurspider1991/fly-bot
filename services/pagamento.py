@@ -16,8 +16,8 @@ log = get_logger(__name__)
 MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN", "")
 
 PLANOS = {
-    "1mes":   {"valor": 14.90, "dias": 30,  "descricao": "Fly Bot - Plano 1 mes"},
-    "5meses": {"valor": 29.90, "dias": 90,  "descricao": "Fly Bot - Plano 3 meses"},
+    "1mes":   {"valor": 1.00, "dias": 30,  "descricao": "Fly Bot - Plano 1 mes"},
+    "5meses": {"valor": 1.00, "dias": 90,  "descricao": "Fly Bot - Plano 3 meses"},
 }
 
 
@@ -56,7 +56,17 @@ def gerar_checkout(chat_id: str, nome: str, plano: str) -> Optional[dict]:
             "failure": f"{base_url}/failure",
         },
         "auto_return":          "approved",
-        "payment_methods":      {"installments": 1},
+        "payment_methods": {
+            "excluded_payment_types": [
+                {"id": "credit_card"},
+                {"id": "debit_card"},
+                {"id": "ticket"},
+                {"id": "bank_transfer"},
+                {"id": "atm"},
+                {"id": "prepaid_card"},
+            ],
+            "installments": 1,
+        },
         "statement_descriptor": "FLYBOT",
     }
 
