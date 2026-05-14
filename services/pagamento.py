@@ -90,7 +90,7 @@ def gerar_checkout(chat_id: str, nome: str, plano: str) -> Optional[dict]:
             log.error(f"MP erro {r.status_code}: {resp}")
             return None
 
-        link = resp.get("init_point") or resp.get("sandbox_init_point")
+        link = resp.get("init_point")
         log.info(f"Checkout gerado: {link}")
         return {
             "preference_id": resp["id"],
