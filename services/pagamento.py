@@ -1,5 +1,5 @@
 """
-services/pagamento.py — Integração Checkout Pro Mercado Pago.
+services/pagamento.py — Integração com Asaas para geração de Pix.
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -9,161 +9,150 @@ import requests
 from datetime import datetime, timedelta
 from typing import Optional
 
-from config import get_logger
+from config import ASAAS_API_KEY, ASAAS_BASE_URL, PLANOS, get_logger
 
 log = get_logger(__name__)
 
-MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN", "")
 
-PLANOS = {
-    "1mes":   {"valor": 1.00, "dias": 30,  "descricao": "Fly Bot - Plano 1 mes"},
-    "5meses": {"valor": 1.00, "dias": 90,  "descricao": "Fly Bot - Plano 3 meses"},
-}
-
-
-def gerar_checkout(chat_id: str, nome: str, plano: str) -> Optional[dict]:
-    """
-    Gera link de Checkout Pro no Mercado Pago.
-    Funciona com CPF (pessoa fisica).
-    Retorna dict com {preference_id, link, valor} ou None.
-    """
-    if not MP_ACCESS_TOKEN:
-        log.error("MP_ACCESS_TOKEN nao configurado!")
-        return None
-
-    plano_info  = PLANOS.get(plano, PLANOS["1mes"])
-    idempotency = str(uuid.uuid4())
-    webhook_url = os.getenv("MP_WEBHOOK_URL", "")
-    base_url    = webhook_url.replace("/webhook", "") if webhook_url else "https://flybot.app"
-
-    payload = {
-        "items": [{
-            "id":          f"flybot_{plano}",
-            "title":       plano_info["descricao"],
-            "quantity":    1,
-            "currency_id": "BRL",
-            "unit_price":  plano_info["valor"],
-        }],
-        "payer": {
-            "email": f"flybot_{chat_id}@flybot.app",
-        },
-        "external_reference": f"{chat_id}:{plano}",
-        "expires":            True,
-        "expiration_date_to": (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%S.000-03:00"),
-        "back_urls": {
-            "success": f"{base_url}/success",
-            "pending": f"{base_url}/pending",
-            "failure": f"{base_url}/failure",
-        },
-        "auto_return":          "approved",
-        "payment_methods": {
-            "excluded_payment_types": [
-                {"id": "credit_card"},
-                {"id": "debit_card"},
-                {"id": "ticket"},
-                {"id": "bank_transfer"},
-                {"id": "atm"},
-                {"id": "prepaid_card"},
-            ],
-            "installments": 1,
-        },
-        "statement_descriptor": "FLYBOT",
+def _headers():
+    return {
+        "access_token": ASAAS_API_KEY,
+        "Content-Type": "application/json",
     }
 
-    if webhook_url.startswith("https://"):
-        payload["notification_url"] = webhook_url
 
-    try:
-        r = requests.post(
-            "https://api.mercadopago.com/checkout/preferences",
-            json=payload,
-            headers={
-                "Authorization":     f"Bearer {MP_ACCESS_TOKEN}",
-                "Content-Type":      "application/json",
-                "X-Idempotency-Key": idempotency,
-            },
-            timeout=15,
-        )
-        resp = r.json()
+def _criar_ou_buscar_cliente(chat_id: str, nome: str) -> Optional[str]:
+    """Cria ou busca cliente no Asaas. Retorna customer_id."""
+    # Busca por externalReference
+    r = requests.get(
+        f"{ASAAS_BASE_URL}/customers",
+        headers=_headers(),
+        params={"externalReference": str(chat_id)},
+        timeout=10,
+    )
+    if r.status_code == 200:
+        data = r.json()
+        if data.get("data"):
+            return data["data"][0]["id"]
 
-        if r.status_code not in (200, 201):
-            log.error(f"MP erro {r.status_code}: {resp}")
-            return None
+    # Cria novo cliente
+    nome_parts = nome.strip().split() if nome else ["Usuario"]
+    r2 = requests.post(
+        f"{ASAAS_BASE_URL}/customers",
+        headers=_headers(),
+        json={
+            "name":              nome or "Usuario FlyBot",
+            "externalReference": str(chat_id),
+            "email":             f"flybot_{chat_id}@flybot.app",
+            "notificationDisabled": True,
+        },
+        timeout=10,
+    )
+    if r2.status_code in (200, 201):
+        return r2.json().get("id")
 
-        link = resp.get("init_point")
-        log.info(f"Checkout gerado: {link}")
-        return {
-            "preference_id": resp["id"],
-            "link":          link,
-            "valor":         plano_info["valor"],
-            "plano":         plano,
-        }
+    log.error(f"Asaas criar cliente erro {r2.status_code}: {r2.text[:200]}")
+    return None
 
-    except Exception as e:
-        log.error(f"MP gerar_checkout erro: {e}")
+
+def gerar_pix(chat_id: str, nome: str, plano: str) -> Optional[dict]:
+    """
+    Gera cobrança Pix no Asaas.
+    Retorna {payment_id, pix_code, valor, expira_em} ou None.
+    """
+    if not ASAAS_API_KEY:
+        log.error("ASAAS_API_KEY não configurado!")
         return None
+
+    plano_info = PLANOS.get(plano, PLANOS["60dias"])
+
+    customer_id = _criar_ou_buscar_cliente(chat_id, nome)
+    if not customer_id:
+        return None
+
+    due_date = (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%d")
+
+    r = requests.post(
+        f"{ASAAS_BASE_URL}/payments",
+        headers=_headers(),
+        json={
+            "customer":          customer_id,
+            "billingType":       "PIX",
+            "value":             plano_info["valor"],
+            "dueDate":           due_date,
+            "description":       plano_info["descricao"],
+            "externalReference": f"{chat_id}:{plano}",
+            "postalService":     False,
+        },
+        timeout=15,
+    )
+
+    if r.status_code not in (200, 201):
+        log.error(f"Asaas criar cobrança erro {r.status_code}: {r.text[:200]}")
+        return None
+
+    payment = r.json()
+    payment_id = payment.get("id")
+
+    # Busca QR Code Pix
+    r2 = requests.get(
+        f"{ASAAS_BASE_URL}/payments/{payment_id}/pixQrCode",
+        headers=_headers(),
+        timeout=10,
+    )
+
+    if r2.status_code != 200:
+        log.error(f"Asaas QR Code erro {r2.status_code}: {r2.text[:200]}")
+        return None
+
+    pix_data = r2.json()
+    return {
+        "payment_id": payment_id,
+        "pix_code":   pix_data.get("payload", ""),
+        "qr_base64":  pix_data.get("encodedImage", ""),
+        "valor":      plano_info["valor"],
+        "plano":      plano,
+        "expira_em":  "24 horas",
+    }
 
 
 def verificar_pagamento(payment_id: str) -> Optional[str]:
-    """Verifica status de um pagamento."""
-    if not MP_ACCESS_TOKEN:
+    """Retorna status da cobrança: CONFIRMED, PENDING, OVERDUE, etc."""
+    if not ASAAS_API_KEY:
         return None
     try:
         r = requests.get(
-            f"https://api.mercadopago.com/v1/payments/{payment_id}",
-            headers={"Authorization": f"Bearer {MP_ACCESS_TOKEN}"},
+            f"{ASAAS_BASE_URL}/payments/{payment_id}",
+            headers=_headers(),
             timeout=10,
         )
         return r.json().get("status")
     except Exception as e:
-        log.error(f"MP verificar_pagamento erro: {e}")
+        log.error(f"Asaas verificar_pagamento erro: {e}")
         return None
 
 
 def processar_webhook(body: dict) -> Optional[dict]:
     """
-    Processa notificacao de webhook do MP.
-    Retorna {chat_id, plano, payment_id} se aprovado, senão None.
+    Processa notificação de webhook do Asaas.
+    Retorna {chat_id, plano, payment_id} se confirmado, senão None.
     """
-    if not MP_ACCESS_TOKEN:
+    evento = body.get("event", "")
+    # PAYMENT_CONFIRMED ou PAYMENT_RECEIVED
+    if evento not in ("PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"):
         return None
-    try:
-        tipo       = body.get("type", "")
-        payment_id = body.get("data", {}).get("id")
-        if not payment_id:
-            return None
 
-        if tipo == "merchant_order":
-            r     = requests.get(
-                f"https://api.mercadopago.com/merchant_orders/{payment_id}",
-                headers={"Authorization": f"Bearer {MP_ACCESS_TOKEN}"},
-                timeout=10,
-            )
-            order    = r.json()
-            aprovado = any(p.get("status") == "approved" for p in order.get("payments", []))
-            if not aprovado:
-                log.info(f"Webhook merchant_order {payment_id}: sem pagamento aprovado")
-                return None
-            ref = order.get("external_reference", "")
-        else:
-            status = verificar_pagamento(payment_id)
-            if status != "approved":
-                log.info(f"Webhook: payment {payment_id} status={status} (ignorado)")
-                return None
-            r    = requests.get(
-                f"https://api.mercadopago.com/v1/payments/{payment_id}",
-                headers={"Authorization": f"Bearer {MP_ACCESS_TOKEN}"},
-                timeout=10,
-            )
-            ref = r.json().get("external_reference", "")
+    payment   = body.get("payment", {})
+    payment_id = payment.get("id", "")
+    ref       = payment.get("externalReference", "")
 
-        partes  = ref.split(":")
-        chat_id = partes[0] if partes else ""
-        plano   = partes[1] if len(partes) > 1 else "1mes"
-
-        log.info(f"Webhook: pagamento aprovado! chat_id={chat_id} plano={plano}")
-        return {"chat_id": chat_id, "plano": plano, "payment_id": payment_id}
-
-    except Exception as e:
-        log.error(f"MP processar_webhook erro: {e}")
+    if not ref:
+        log.warning(f"Webhook sem externalReference: {payment_id}")
         return None
+
+    partes  = ref.split(":")
+    chat_id = partes[0] if partes else ""
+    plano   = partes[1] if len(partes) > 1 else "60dias"
+
+    log.info(f"Webhook Asaas: pagamento confirmado chat_id={chat_id} plano={plano}")
+    return {"chat_id": chat_id, "plano": plano, "payment_id": payment_id}

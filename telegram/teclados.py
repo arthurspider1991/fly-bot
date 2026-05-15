@@ -9,19 +9,19 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import calendar
 from datetime import datetime, date, timedelta
 
-from config import PIX_VALOR_1MES, PIX_VALOR_5MESES
 from telegram.aeroportos import BRASIL_ESTADOS, BRASIL_AEROPORTOS, OUTROS_PAISES
 
 
 def teclado_planos() -> dict:
+    from config import PLANOS
     return {"inline_keyboard": [
-        [
-            {"text": f"📅 1 mês — {PIX_VALOR_1MES}",     "callback_data": "plano:1mes"},
-            {"text": f"📅 3 meses — {PIX_VALOR_5MESES}", "callback_data": "plano:5meses"},
-        ],
-        [
-            {"text": "✈️ Voos internacionais", "callback_data": "internacional"},
-        ],
+        [{"text": f"📅 {PLANOS['60dias']['nome']} — R$ {PLANOS['60dias']['valor']:.2f}",
+          "callback_data": "plano:60dias"}],
+        [{"text": f"📅 {PLANOS['5meses']['nome']} — R$ {PLANOS['5meses']['valor']:.2f}",
+          "callback_data": "plano:5meses"}],
+        [{"text": f"📅 {PLANOS['1ano']['nome']} — R$ {PLANOS['1ano']['valor']:.2f}",
+          "callback_data": "plano:1ano"}],
+        [{"text": "✈️ Voos internacionais", "callback_data": "internacional"}],
     ]}
 
 
