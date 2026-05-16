@@ -252,25 +252,36 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
             plano          = callback_data.split(":")[1]
             dados["plano"] = plano
             salvar_usuario(chat_id, dados)
-            # Tenta gerar Pix via Asaas
+            p = PLANOS.get(plano, PLANOS["60dias"])
+
             log.info(f"Plano selecionado: {plano} | MP configurado: {bool(MP_ACCESS_TOKEN)}")
+
             if MP_ACCESS_TOKEN:
-                enviar(chat_id, "⏳ Gerando seu Pix...")
+                # Mensagem 1: explica como pagar
+                enviar(chat_id,
+                    f"✅ *Plano {p['label']} selecionado!*\n\n"
+                    f"💰 Valor: *R$ {p['valor']:.2f}*\n\n"
+                    "📱 *Como pagar:*\n"
+                    "1️⃣ Copie o código Pix abaixo\n"
+                    "2️⃣ Abra o app do seu banco\n"
+                    "3️⃣ Vá em *Pix → Pix Copia e Cola*\n"
+                    "4️⃣ Cole o código e confirme o pagamento\n\n"
+                    "⚡ _A liberação é automática após a confirmação!_"
+                )
+                # Gera o Pix
+                enviar(chat_id, "⏳ Gerando seu código Pix...")
                 pix = gerar_pix(chat_id, nome, plano)
                 if pix:
-                    p = PLANOS[plano]
-                    enviar(chat_id,
-                        f"✅ *Plano {p['label']} — R$ {p['valor']:.2f}*\n\n"
-                        f"📋 *Pix copia e cola:*\n`{pix['pix_code']}`\n\n"
-                        f"⏰ Válido por {pix['expira_em']}\n\n"
-                        "Copie o código acima e cole no app do seu banco em *Pix → Copia e cola*.\n\n"
-                        "_Após o pagamento, a liberação é automática!_ ⚡\n\n"
-                        "❓ Problema? /suporte",
-                        reply_markup=teclado_paguei()
-                    )
+                    # Mensagem 2: só o código para copiar fácil
+                    enviar(chat_id, f"`{pix['pix_code']}`")
                     dados["payment_id"] = pix["payment_id"]
+                    dados["status"]     = "aguardando_pagamento_mp"
                     salvar_usuario(chat_id, dados)
                     return
+                else:
+                    log.warning(f"MP falhou ao gerar Pix para {chat_id}, usando fluxo manual")
+
+            # Fallback: fluxo manual com comprovante
             enviar(chat_id, msg_pix(plano), reply_markup=teclado_paguei())
             return
 
@@ -324,6 +335,12 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
     if texto == "/suporte": return  # já tratado acima
     if status == "aguardando_pagamento":
         enviar(chat_id, msg_boas_vindas(nome), reply_markup=teclado_planos()); return
+    if status == "aguardando_pagamento_mp":
+        enviar(chat_id,
+            "⏳ *Aguardando confirmação do pagamento.*\n\n"
+            "Assim que o Pix for confirmado seu acesso é liberado automaticamente. ⚡\n\n"
+            "❓ Problema? /suporte"
+        ); return
     if status == "aguardando_comprovante":
         enviar(chat_id, "📎 Envie o comprovante como *foto* ou *PDF*.\n\n❓ Problema? /suporte"); return
     if status == "aguardando_liberacao":

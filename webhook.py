@@ -86,10 +86,12 @@ def _processar_notificacao(body: dict):
     dados["slot_manha"]  = atribuir_slot_manha()
     salvar_usuario(chat_id, dados)
 
-    expira  = (datetime.now() + timedelta(days=dias_plano(plano))).strftime("%d/%m/%Y")
-    label   = "1 mês" if plano == "1mes" else "3 meses"
-    nome    = dados.get("nome", "Usuário")
-    tipo    = "🔄 Renovação" if era_renovacao else "✅ Novo acesso"
+    from config import PLANOS
+    p      = PLANOS.get(plano, PLANOS.get("60dias", {}))
+    label  = p.get("label", plano)
+    expira = (datetime.now() + timedelta(days=dias_plano(plano))).strftime("%d/%m/%Y")
+    nome   = dados.get("nome", "Usuário")
+    tipo   = "🔄 Renovação" if era_renovacao else "✅ Novo acesso"
 
     # Avisa o admin
     enviar(ADMIN_CHAT_ID,
@@ -100,11 +102,16 @@ def _processar_notificacao(body: dict):
         "_Liberado automaticamente pelo MP_ ✅"
     )
 
-    # Libera o usuário
+    # Libera o usuário com mensagem de boas-vindas
     import textos as T
+    enviar(int(chat_id),
+        f"✅ *Pagamento confirmado!*\n\n"
+        f"Plano *{label}* ativo até {expira}.\n\n"
+        "Agora vamos configurar sua rota de monitoramento 👇"
+    )
     enviar(int(chat_id), T.SETUP_LIBERADO, reply_markup=teclado_paises("ori"))
 
-    log.info(f"Acesso liberado automaticamente: {chat_id} plano={plano}")
+    log.info(f"Acesso liberado automaticamente via MP: {chat_id} plano={plano}")
 
 
 def iniciar_servidor():
