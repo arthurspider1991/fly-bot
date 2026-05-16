@@ -60,17 +60,22 @@ def gerar_pix(chat_id: str, nome: str, plano: str) -> Optional[dict]:
         log.error(f"MP gerar_pix request erro: {e}")
         return None
 
+    log.info(f"MP resposta status: {r.status_code}")
     if r.status_code not in (200, 201):
-        log.error(f"MP criar pagamento erro {r.status_code}: {r.text[:300]}")
+        log.error(f"MP criar pagamento erro {r.status_code}: {r.text[:500]}")
         return None
 
     data       = r.json()
+    log.info(f"MP resposta keys: {list(data.keys())}")
     payment_id = data.get("id")
+    status_mp  = data.get("status", "")
+    log.info(f"MP payment_id={payment_id} status={status_mp}")
     pix_info   = data.get("point_of_interaction", {}).get("transaction_data", {})
     pix_code   = pix_info.get("qr_code", "")
+    log.info(f"MP pix_code presente: {bool(pix_code)} | point_of_interaction: {bool(data.get('point_of_interaction'))}")
 
     if not pix_code:
-        log.error(f"MP pix_code vazio. Resposta: {data}")
+        log.error(f"MP pix_code vazio. Resposta completa: {data}")
         return None
 
     log.info(f"MP Pix gerado: payment_id={payment_id} plano={plano} chat_id={chat_id}")
