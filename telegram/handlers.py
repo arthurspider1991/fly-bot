@@ -9,7 +9,7 @@ import threading
 from datetime import datetime, date, timedelta
 
 import textos as T
-from config import ADMIN_CHAT_ID, PLANOS, COMISSAO_MINIMO_SAQUE, ASAAS_API_KEY, get_logger
+from config import ADMIN_CHAT_ID, PLANOS, COMISSAO_MINIMO_SAQUE, MP_ACCESS_TOKEN, get_logger
 from db.usuarios import (
     carregar_usuario, salvar_usuario, carregar_todos_usuarios,
     salvar_lead_internacional, listar_leads_internacionais,
@@ -253,18 +253,20 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
             dados["plano"] = plano
             salvar_usuario(chat_id, dados)
             # Tenta gerar Pix via Asaas
-            log.info(f"Plano selecionado: {plano} | Asaas configurado: {bool(ASAAS_API_KEY)}")
-            if ASAAS_API_KEY:
+            log.info(f"Plano selecionado: {plano} | MP configurado: {bool(MP_ACCESS_TOKEN)}")
+            if MP_ACCESS_TOKEN:
                 enviar(chat_id, "⏳ Gerando seu Pix...")
                 pix = gerar_pix(chat_id, nome, plano)
                 if pix:
                     p = PLANOS[plano]
                     enviar(chat_id,
                         f"✅ *Plano {p['label']} — R$ {p['valor']:.2f}*\n\n"
-                        f"📋 *Código Pix (copia e cola):*\n`{pix['pix_code']}`\n\n"
+                        f"📋 *Pix copia e cola:*\n`{pix['pix_code']}`\n\n"
                         f"⏰ Válido por {pix['expira_em']}\n\n"
+                        "Copie o código acima e cole no app do seu banco em *Pix → Copia e cola*.\n\n"
                         "_Após o pagamento, a liberação é automática!_ ⚡\n\n"
                         "❓ Problema? /suporte",
+                        reply_markup=teclado_paguei()
                     )
                     dados["payment_id"] = pix["payment_id"]
                     salvar_usuario(chat_id, dados)

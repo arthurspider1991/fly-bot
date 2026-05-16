@@ -11,10 +11,9 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 ADMIN_CHAT_ID  = int(os.getenv("ADMIN_CHAT_ID", "0"))
 
-# ── Asaas ─────────────────────────────────────────────────────────────────────
-ASAAS_API_KEY  = os.getenv("ASAAS_API_KEY", "")
-ASAAS_BASE_URL = os.getenv("ASAAS_BASE_URL", "https://api.asaas.com/v3")  # produção
-# Sandbox: https://sandbox.asaas.com/api/v3
+# ── Mercado Pago ──────────────────────────────────────────────────────────────
+MP_ACCESS_TOKEN = os.getenv("MP_ACCESS_TOKEN", "")
+MP_PUBLIC_KEY   = os.getenv("MP_PUBLIC_KEY", "")
 
 # ── Planos ────────────────────────────────────────────────────────────────────
 PLANOS = {
