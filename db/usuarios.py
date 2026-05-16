@@ -19,16 +19,23 @@ _lock = threading.Lock()
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _row_to_dict(row) -> dict:
+    keys = row.keys()
+    def g(k, default=None):
+        return row[k] if k in keys else default
     return {
-        "nome":             row["nome"],
-        "status":           row["status"],
-        "config":           json.loads(row["config"]           or "{}"),
-        "historico":        json.loads(row["historico"]        or "{}"),
-        "historico_precos": json.loads(row["historico_precos"] or "{}"),
-        "liberado_em":      row["liberado_em"],
-        "plano":            row["plano"] or "1mes",
-        "proxima_busca":    row["proxima_busca"],
-        "slot_manha":       row["slot_manha"],
+        "nome":             g("nome", "Usuário"),
+        "status":           g("status", "aguardando_pagamento"),
+        "config":           json.loads(g("config")           or "{}"),
+        "historico":        json.loads(g("historico")        or "{}"),
+        "historico_precos": json.loads(g("historico_precos") or "{}"),
+        "liberado_em":      g("liberado_em"),
+        "plano":            g("plano") or "60dias",
+        "proxima_busca":    g("proxima_busca"),
+        "slot_manha":       g("slot_manha"),
+        "ref_afiliado":     g("ref_afiliado"),
+        "status_temp":      g("status_temp"),
+        "payment_id":       g("payment_id"),
+        "preference_id":    g("preference_id"),
     }
 
 # ── Operações ─────────────────────────────────────────────────────────────────

@@ -127,9 +127,13 @@ def init_db() -> None:
         # Migração suave: adiciona colunas caso venha de versão anterior
         for col, default in [
             ("historico_precos", "'{}'"),
-            ("plano",            "'1mes'"),
+            ("plano",            "'60dias'"),
             ("proxima_busca",    "NULL"),
             ("slot_manha",       "NULL"),
+            ("ref_afiliado",     "NULL"),
+            ("status_temp",      "NULL"),
+            ("payment_id",       "NULL"),
+            ("preference_id",    "NULL"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE usuarios ADD COLUMN {col} TEXT DEFAULT {default}")
