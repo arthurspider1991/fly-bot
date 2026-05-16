@@ -102,14 +102,25 @@ def _processar_notificacao(body: dict):
         "_Liberado automaticamente pelo MP_ ✅"
     )
 
-    # Libera o usuário com mensagem de boas-vindas
+    # Libera o usuário com mensagem de confirmação + botões de escolha
     import textos as T
+    from db.usuarios import buscar_afiliado, criar_afiliado
+
+    # Garante que o afiliado já existe para ter o código pronto
+    buscar_afiliado(chat_id) or criar_afiliado(chat_id)
+
+    markup_pos_pagamento = {"inline_keyboard": [
+        [{"text": "🛠 Configurar Minha Rota", "callback_data": "configurar_rota"}],
+        [{"text": "💰 Indique e Ganhe",        "callback_data": "ver_indique"}],
+    ]}
     enviar(int(chat_id),
         f"✅ *Pagamento confirmado!*\n\n"
-        f"Plano *{label}* ativo até {expira}.\n\n"
-        "Agora vamos configurar sua rota de monitoramento 👇"
+        f"Seu plano de *{label}* está ativo até *{expira}*.\n\n"
+        "O que você deseja fazer agora? Escolha uma das opções abaixo:",
+        reply_markup=markup_pos_pagamento
     )
-    enviar(int(chat_id), T.SETUP_LIBERADO, reply_markup=teclado_paises("ori"))
+
+    log.info(f"Acesso liberado automaticamente via MP: {chat_id} plano={plano}")
 
     log.info(f"Acesso liberado automaticamente via MP: {chat_id} plano={plano}")
 

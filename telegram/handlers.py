@@ -63,7 +63,7 @@ def pix_info(plano: str):
 # ── Mensagens ─────────────────────────────────────────────────────────────────
 
 COMANDOS_USUARIO = (
-    "/status · /indique e ganhe · /suporte · /reconfigurar · /parar"
+    "/status · /indicar · /carteira · /suporte · /reconfigurar · /parar"
 )
 
 def msg_boas_vindas(nome: str) -> str:
@@ -116,6 +116,34 @@ def _finalizar_setup(chat_id, dados: dict, nome: str) -> None:
         executar_ciclo_usuario(chat_id, modo="completo")
     threading.Thread(target=busca_inicial, daemon=True).start()
 
+
+# ── Indique e Ganhe ───────────────────────────────────────────────────────────
+
+def _enviar_indique(chat_id: str):
+    """Manda a mensagem completa de indique e ganhe com botão compartilhar."""
+    af       = buscar_afiliado(chat_id) or criar_afiliado(chat_id)
+    codigo   = af.get("codigo", "") if af else ""
+    bot_user = os.getenv("TELEGRAM_BOT_USERNAME", "seubot")
+    link     = f"https://t.me/{bot_user}?start={codigo}"
+
+    from config import PLANOS as P
+    comissoes = ""
+    for k, p in P.items():
+        comissoes += f"• {p['label']} — R$ {p.get('comissao', 0):.2f}\n"
+
+    markup = {"inline_keyboard": [[
+        {"text": "🔗 Compartilhar meu link", "url": f"https://t.me/share/url?url={link}&text=Monitore+passagens+a%C3%A9reas+e+compre+na+hora+certa%21"}
+    ]]}
+    enviar(int(chat_id),
+        "🚀 *Que tal faturar uma grana extra com a gente?*\n\n"
+        "É simples: compartilhe seu link exclusivo com amigos e ganhe uma comissão "
+        "toda vez que alguém assinar um plano!\n\n"
+        f"💰 *Tabela de comissões:*\n{comissoes}\n"
+        "Sua comissão é creditada automaticamente assim que a assinatura for confirmada "
+        "e você pode sacar quando quiser.\n\n"
+        f"🔗 *Seu link exclusivo:*\n`{link}`",
+        reply_markup=markup
+    )
 
 # ── Handler principal ─────────────────────────────────────────────────────────
 
@@ -214,6 +242,16 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
                 )
                 if msg_obj and msg_obj.get("message_id"):
                     editar_mensagem_markup(chat_id, msg_obj["message_id"])
+            return
+
+        if callback_data == "configurar_rota":
+            import textos as T
+            from telegram.teclados import teclado_paises
+            enviar(chat_id, T.SETUP_LIBERADO, reply_markup=teclado_paises("ori"))
+            return
+
+        if callback_data == "ver_indique":
+            _enviar_indique(chat_id)
             return
 
         if callback_data == "internacional":
@@ -805,34 +843,28 @@ def _processar_usuario(chat_id, texto, dados, nome, status, msg_obj=None):
         enviar(chat_id, "\n".join(linhas))
         return
 
-    if texto in ("/indique e ganhe", "/indique"):
-        # Cria afiliado se não existir
+    if texto in ("/indique e ganhe", "/indique", "/indicar"):
+        _enviar_indique(chat_id)
+        return
+
+    if texto == "/carteira":
         af = buscar_afiliado(chat_id)
         if not af:
             af = criar_afiliado(chat_id)
-        codigo  = af.get("codigo", "")
-        saldo   = af.get("saldo", 0.0)
-        total   = af.get("total_ganho", 0.0)
-        pagantes = af.get("total_pagantes", 0)
+        saldo     = af.get("saldo", 0.0)
+        total     = af.get("total_ganho", 0.0)
+        pagantes  = af.get("total_pagantes", 0)
         indicados = af.get("total_indicados", 0)
-        bot_user = os.getenv("TELEGRAM_BOT_USERNAME", "seubot")
-        link    = f"https://t.me/{bot_user}?start={codigo}"
         enviar(chat_id,
-            f"🎉 *Que bom ter você por aqui!*\n\n"
-            f"Indique amigos e ganhe comissão em cada assinatura confirmada:\n\n"
-            f"💰 *Comissões por plano:*\n"
-            f"• 60 dias — R$ 5,00\n"
-            f"• 5 meses — R$ 10,00\n"
-            f"• 1 ano — R$ 20,00\n\n"
-            f"🔗 *Seu link de indicação:*\n`{link}`\n\n"
-            f"📊 *Seu histórico:*\n"
-            f"• Indicados: {indicados}\n"
-            f"• Assinantes: {pagantes}\n"
-            f"• Total ganho: R$ {total:.2f}\n\n"
-            f"💳 *Sua carteira:*\n"
-            f"Saldo disponível: *R$ {saldo:.2f}*\n\n"
-            + (f"Para sacar, use /sacar" if saldo >= COMISSAO_MINIMO_SAQUE
-               else f"_Saldo mínimo para saque: R$ {COMISSAO_MINIMO_SAQUE:.2f}_")
+            f"💳 *Sua carteira*\n\n"
+            f"• Indicações: {indicados}\n"
+            f"• Confirmadas: {pagantes}\n"
+            f"• Total ganho: R$ {total:.2f}\n"
+            f"• Saldo disponível: *R$ {saldo:.2f}*\n\n"
+            + (f"👉 Use /sacar para transferir seu saldo."
+               if saldo >= COMISSAO_MINIMO_SAQUE
+               else f"_Mínimo para saque: R$ {COMISSAO_MINIMO_SAQUE:.2f}_\n\n"
+                    f"Continue indicando! Use /indicar para pegar seu link.")
         )
         return
 
