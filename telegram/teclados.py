@@ -15,11 +15,11 @@ from telegram.aeroportos import BRASIL_ESTADOS, BRASIL_AEROPORTOS, OUTROS_PAISES
 def teclado_planos() -> dict:
     from config import PLANOS
     return {"inline_keyboard": [
-        [{"text": f"📅 {PLANOS['60dias']['nome']} — R$ {PLANOS['60dias']['valor']:.2f}",
+        [{"text": f"📅 {PLANOS['60dias']['label']} — R$ {PLANOS['60dias']['valor']:.2f}",
           "callback_data": "plano:60dias"}],
-        [{"text": f"📅 {PLANOS['5meses']['nome']} — R$ {PLANOS['5meses']['valor']:.2f}",
+        [{"text": f"📅 {PLANOS['5meses']['label']} — R$ {PLANOS['5meses']['valor']:.2f}",
           "callback_data": "plano:5meses"}],
-        [{"text": f"📅 {PLANOS['1ano']['nome']} — R$ {PLANOS['1ano']['valor']:.2f}",
+        [{"text": f"📅 {PLANOS['1ano']['label']} — R$ {PLANOS['1ano']['valor']:.2f}",
           "callback_data": "plano:1ano"}],
         [{"text": "✈️ Voos internacionais", "callback_data": "internacional"}],
     ]}
