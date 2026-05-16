@@ -248,10 +248,6 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
                 enviar(chat_id, T.JA_TEM_ACESSO.format(info=info))
             return
 
-        if ":" in callback_data:
-            _processar_navegacao(chat_id, callback_data, dados, nome, status)
-            return
-
         if callback_data.startswith("plano:"):
             plano          = callback_data.split(":")[1]
             dados["plano"] = plano
@@ -274,6 +270,10 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
                     salvar_usuario(chat_id, dados)
                     return
             enviar(chat_id, msg_pix(plano), reply_markup=teclado_paguei())
+            return
+
+        if ":" in callback_data:
+            _processar_navegacao(chat_id, callback_data, dados, nome, status)
             return
 
     # ── Admin ──────────────────────────────────────────────────────────────────

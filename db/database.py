@@ -124,6 +124,40 @@ def init_db() -> None:
                 criado_em  TEXT
             )
         """)
+        # Garante tabelas novas existam (bancos antigos)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS afiliados (
+                chat_id         TEXT PRIMARY KEY,
+                codigo          TEXT UNIQUE,
+                saldo           REAL DEFAULT 0,
+                total_ganho     REAL DEFAULT 0,
+                total_indicados INTEGER DEFAULT 0,
+                total_pagantes  INTEGER DEFAULT 0,
+                criado_em       TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS indicacoes (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                afiliado_chat_id TEXT,
+                indicado_chat_id TEXT,
+                plano            TEXT,
+                comissao         REAL,
+                status           TEXT DEFAULT 'pendente',
+                criado_em        TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS leads_internacionais (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id   TEXT,
+                nome      TEXT,
+                origem    TEXT,
+                destino   TEXT,
+                criado_em TEXT
+            )
+        """)
+
         # Migração suave: adiciona colunas caso venha de versão anterior
         for col, default in [
             ("historico_precos", "'{}'"),
