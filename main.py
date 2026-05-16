@@ -39,19 +39,16 @@ def main():
 
     log.info(f"Bot v5 iniciado. Admin: {ADMIN_CHAT_ID}")
     enviar(ADMIN_CHAT_ID,
-        "🤖 *Bot v5 iniciado!*\n\n"
-        "`/liberar <id>` — ativa/renova\n"
-        "`/bloquear <id>` — suspende\n"
-        "`/usuarios` — lista todos\n"
-        "`/vencendo` — assinaturas vencendo\n"
-        "`/forcarbusca` — busca imediata\n"
-        "`/broadcast <msg>` — envia para todos\n"
-        "`/msg <id> <msg>` — envia para um usuário\n\n"
-        "_Ciclos individuais a cada 2h | Slots matinais: 05-08h_"
+        "🤖 Bot v5 iniciado!\n\n"
+        "/liberar /bloquear /resetar\n"
+        "/usuarios /vencendo /afiliados\n"
+        "/forcarbusca /broadcast /campanha\n"
+        "/leads /msg\n\n"
+        "Ciclos a cada 2h | Slots matinais: 05-08h"
     )
 
     # Threads
-    iniciar_webhook()  # recebe notificações do Mercado Pago
+    iniciar_webhook()  # recebe notificações do Asaas
     threading.Thread(target=loop_polling, daemon=True).start()
     threading.Thread(target=loop_ciclos,  daemon=True).start()
 

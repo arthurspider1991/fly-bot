@@ -120,6 +120,7 @@ def _finalizar_setup(chat_id, dados: dict, nome: str) -> None:
 # ── Handler principal ─────────────────────────────────────────────────────────
 
 def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_data=None) -> None:
+    nome = nome or 'Usuário'
     chat_id = str(chat_id)
     dados   = carregar_usuario(chat_id)
 
