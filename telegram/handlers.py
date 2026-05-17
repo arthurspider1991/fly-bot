@@ -10,6 +10,8 @@ from datetime import datetime, date, timedelta
 
 import textos as T
 from config import ADMIN_CHAT_ID, PLANOS, COMISSAO_MINIMO_SAQUE, MP_ACCESS_TOKEN, get_logger
+from db.financeiro import (relatorio_geral, extrato_recente, afiliados_com_saldo_detalhado,
+                           receita_por_plano, confirmar_saque_mov)
 from db.usuarios import (
     carregar_usuario, salvar_usuario, carregar_todos_usuarios,
     salvar_lead_internacional, listar_leads_internacionais,
@@ -579,6 +581,78 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
                 f"Saldo: R$ {af_info.get('saldo',comissao):.2f}\n\nUse /indique e ganhe"
             )
         return
+
+        if texto == "/financeiro":
+            r = relatorio_geral()
+            por_plano = receita_por_plano()
+            linhas_plano = ""
+            for p in por_plano:
+                linhas_plano += f"  • {p['plano']}: {p['qtd']}x — R$ {p['total']:.2f}\n"
+            enviar(chat_id,
+                "📊 *Resumo Financeiro*\n"
+                "━━━━━━━━━━━━━━━━━━\n\n"
+                f"💰 *Receita total:* R$ {r['receita_total']:.2f}\n"
+                f"📦 *Assinaturas:* {r['total_assinaturas']}\n\n"
+                f"👥 *Comissões a pagar:* R$ {r['comissoes_pendentes']:.2f}\n"
+                f"✅ *Comissões pagas:* R$ {r['comissoes_pagas']:.2f}\n"
+                f"⏳ *Saques pendentes:* R$ {r['saques_pendentes_valor']:.2f}\n\n"
+                f"💵 *Lucro líquido:* R$ {r['lucro_liquido']:.2f}\n\n"
+                f"👤 *Afiliados com saldo:* {r['afiliados_com_saldo']}\n\n"
+                f"📈 *Por plano:*\n{linhas_plano}\n"
+                "_/extrato — movimentações_\n"
+                "_/afiliados\_saldo — o que deve_"
+            )
+            return
+
+        if texto == "/extrato":
+            movs = extrato_recente(30)
+            if not movs:
+                enviar(chat_id, "Nenhuma movimentação ainda."); return
+            EMOJI  = {"receita": "💰", "comissao": "👥", "saque": "💸"}
+            STATUS = {"confirmado": "✅", "pendente": "⏳", "pago": "✅"}
+            linhas = ["📋 *Últimas 30 movimentações:*\n"]
+            for m in movs:
+                dt    = m["criado_em"][:10]
+                em    = EMOJI.get(m["tipo"], "•")
+                st    = STATUS.get(m["status"], m["status"])
+                sinal = "+" if m["tipo"] == "receita" else "-"
+                linhas.append(
+                    f"{em} {st} `{sinal}R$ {m['valor']:.2f}` {dt}\n"
+                    f"   _{m['descricao']}_"
+                )
+            enviar(chat_id, "\n".join(linhas))
+            return
+
+        if texto == "/afiliados_saldo":
+            lista = afiliados_com_saldo_detalhado()
+            if not lista:
+                enviar(chat_id, "✅ Nenhum afiliado com saldo pendente."); return
+            total_devido = sum(a["saldo"] for a in lista)
+            linhas = [f"👥 *Afiliados com saldo a pagar:*\nTotal: *R$ {total_devido:.2f}*\n"]
+            for a in lista:
+                nome_af = a.get("nome") or a["chat_id"]
+                pix     = a.get("chave_pix") or "_(sem saque solicitado)_"
+                linhas.append(
+                    f"• *{nome_af}* (`{a['chat_id']}`)\n"
+                    f"  Saldo: R$ {a['saldo']:.2f} | Confirmados: {a['total_pagantes']}\n"
+                    f"  Pix: `{pix}`"
+                )
+            enviar(chat_id, "\n".join(linhas))
+            return
+
+        if texto.startswith("/pagar_saque"):
+            partes = texto.split()
+            if len(partes) < 2:
+                enviar(chat_id, "Use: `/pagar_saque <saque_id>`"); return
+            try:
+                saque_id = int(partes[1])
+                confirmar_saque_mov(saque_id)
+                from db.usuarios import confirmar_saque
+                confirmar_saque(saque_id)
+                enviar(chat_id, f"✅ Saque #{saque_id} marcado como pago.")
+            except Exception as e:
+                enviar(chat_id, f"❌ Erro: {e}")
+            return
 
     if texto.startswith("/bloquear"):
         partes = texto.split()

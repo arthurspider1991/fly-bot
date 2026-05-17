@@ -103,6 +103,11 @@ def _processar_notificacao(body: dict):
     )
 
     from db.usuarios import buscar_afiliado, criar_afiliado, confirmar_comissao
+    from config import PLANOS as _PLANOS
+
+    # Registra receita
+    _valor_plano = float(_PLANOS.get(plano, {}).get("valor", 0))
+    registrar_receita(chat_id, nome, plano, _valor_plano, payment_id)
 
     # Credita comissão ao afiliado que indicou (se houver)
     try:
@@ -113,6 +118,7 @@ def _processar_notificacao(body: dict):
             af_dados = buscar_afiliado(afiliado_id)
             af_nome  = af_dados.get("nome", "afiliado") if af_dados else "afiliado"
             log.info(f"Comissão creditada: R$ {comissao:.2f} para {afiliado_id} ({af_nome})")
+            registrar_comissao(afiliado_id, af_nome, nome, plano, comissao, payment_id)
             # Avisa o afiliado
             enviar(int(afiliado_id),
                 f"🎉 *Comissão creditada!*\n\n"
