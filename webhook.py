@@ -102,13 +102,37 @@ def _processar_notificacao(body: dict):
         "_Liberado automaticamente pelo MP_ ✅"
     )
 
-    # Libera o usuário com mensagem de confirmação + botões de escolha
-    import textos as T
-    from db.usuarios import buscar_afiliado, criar_afiliado
+    from db.usuarios import buscar_afiliado, criar_afiliado, confirmar_comissao
 
-    # Garante que o afiliado já existe para ter o código pronto
+    # Credita comissão ao afiliado que indicou (se houver)
+    try:
+        resultado_comissao = confirmar_comissao(chat_id)
+        if resultado_comissao:
+            afiliado_id = resultado_comissao["afiliado_id"]
+            comissao    = resultado_comissao["comissao"]
+            af_dados = buscar_afiliado(afiliado_id)
+            af_nome  = af_dados.get("nome", "afiliado") if af_dados else "afiliado"
+            log.info(f"Comissão creditada: R$ {comissao:.2f} para {afiliado_id} ({af_nome})")
+            # Avisa o afiliado
+            enviar(int(afiliado_id),
+                f"🎉 *Comissão creditada!*\n\n"
+                f"Sua indicação assinou o plano *{label}* e você ganhou *R$ {comissao:.2f}*!\n\n"
+                "Use /carteira para ver seu saldo."
+            )
+            # Avisa o admin
+            enviar(ADMIN_CHAT_ID,
+                f"💰 *Comissão gerada*\n"
+                f"Afiliado: {af_nome} (`{afiliado_id}`)\n"
+                f"Indicado: {nome} (`{chat_id}`)\n"
+                f"Plano: {label} | Comissão: R$ {comissao:.2f}"
+            )
+    except Exception as e:
+        log.error(f"Erro ao creditar comissão: {e}")
+
+    # Garante que o novo usuário já tem registro de afiliado
     buscar_afiliado(chat_id) or criar_afiliado(chat_id)
 
+    # Manda mensagem de confirmação com botões
     markup_pos_pagamento = {"inline_keyboard": [
         [{"text": "🛠 Configurar Minha Rota", "callback_data": "configurar_rota"}],
         [{"text": "💰 Indique e Ganhe",        "callback_data": "ver_indique"}],
@@ -119,8 +143,6 @@ def _processar_notificacao(body: dict):
         "O que você deseja fazer agora? Escolha uma das opções abaixo:",
         reply_markup=markup_pos_pagamento
     )
-
-    log.info(f"Acesso liberado automaticamente via MP: {chat_id} plano={plano}")
 
     log.info(f"Acesso liberado automaticamente via MP: {chat_id} plano={plano}")
 
