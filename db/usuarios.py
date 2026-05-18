@@ -323,34 +323,7 @@ def registrar_indicacao(afiliado_chat_id, indicado_chat_id, plano: str, comissao
         conn.close()
 
 
-def confirmar_comissao(indicado_id):
-    """Confirma comissão quando o indicado paga. Credita na carteira do afiliado."""
-    indicado_id = str(indicado_id)
-    with _lock:
-        conn = get_conn()
-        row  = conn.execute(
-            "SELECT * FROM indicacoes WHERE indicado_id=? AND status='pendente'",
-            (indicado_id,)
-        ).fetchone()
-        if row:
-            afiliado_id = row["afiliado_id"]
-            comissao    = float(row["comissao"])
-            conn.execute(
-                "UPDATE indicacoes SET status='confirmado' WHERE indicado_id=? AND status='pendente'",
-                (indicado_id,)
-            )
-            conn.execute("""
-                UPDATE afiliados SET
-                    saldo          = saldo + ?,
-                    total_ganho    = total_ganho + ?,
-                    total_pagantes = total_pagantes + 1
-                WHERE chat_id = ?
-            """, (comissao, comissao, afiliado_id))
-            conn.commit()
-            conn.close()
-            return {"afiliado_id": afiliado_id, "comissao": comissao}
-        conn.close()
-    return None
+# confirmar_comissao: usar a versao na linha 185 que recebe plano
 
 
 def registrar_novo_indicado(afiliado_chat_id):

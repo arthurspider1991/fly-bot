@@ -91,8 +91,10 @@ def _processar_notificacao(body: dict):
 
     # Credita comissao ao afiliado
     try:
-        res = confirmar_comissao(chat_id)
-        if res:
+        # Usa a versão que recebe plano e busca comissao do config.py
+        af_id_raw, comissao_raw = confirmar_comissao(chat_id, plano)
+        res = {"afiliado_id": af_id_raw, "comissao": comissao_raw} if af_id_raw else None
+        if res and comissao_raw > 0:
             afiliado_id = str(res["afiliado_id"])
             comissao    = float(res["comissao"])
             af          = buscar_afiliado(afiliado_id)
