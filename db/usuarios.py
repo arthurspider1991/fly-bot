@@ -323,21 +323,21 @@ def registrar_indicacao(afiliado_chat_id, indicado_chat_id, plano: str, comissao
         conn.close()
 
 
-def confirmar_comissao(indicado_chat_id):
+def confirmar_comissao(indicado_id):
     """Confirma comissão quando o indicado paga. Credita na carteira do afiliado."""
-    indicado_chat_id = str(indicado_chat_id)
+    indicado_id = str(indicado_id)
     with _lock:
         conn = get_conn()
         row  = conn.execute(
-            "SELECT * FROM indicacoes WHERE indicado_chat_id=? AND status='pendente'",
-            (indicado_chat_id,)
+            "SELECT * FROM indicacoes WHERE indicado_id=? AND status='pendente'",
+            (indicado_id,)
         ).fetchone()
         if row:
-            afiliado_id = row["afiliado_chat_id"]
-            comissao    = row["comissao"]
+            afiliado_id = row["afiliado_id"]
+            comissao    = float(row["comissao"])
             conn.execute(
-                "UPDATE indicacoes SET status='confirmado' WHERE indicado_chat_id=? AND status='pendente'",
-                (indicado_chat_id,)
+                "UPDATE indicacoes SET status='confirmado' WHERE indicado_id=? AND status='pendente'",
+                (indicado_id,)
             )
             conn.execute("""
                 UPDATE afiliados SET

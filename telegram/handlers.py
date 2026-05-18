@@ -247,8 +247,6 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
             return
 
         if callback_data == "configurar_rota":
-            import textos as T
-            from telegram.teclados import teclado_paises
             enviar(chat_id, T.SETUP_LIBERADO, reply_markup=teclado_paises("ori"))
             return
 
@@ -600,7 +598,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
                 f"👤 *Afiliados com saldo:* {r['afiliados_com_saldo']}\n\n"
                 f"📈 *Por plano:*\n{linhas_plano}\n"
                 "_/extrato — movimentações_\n"
-                "_/afiliados\_saldo — o que deve_"
+                "_/afiliados saldo — o que deve_"
             )
             return
 
