@@ -1,6 +1,5 @@
 """
-webhook.py — Servidor HTTP simples para receber webhooks do Mercado Pago.
-Roda junto com o bot na mesma porta que o Railway expõe.
+webhook.py — Servidor HTTP para receber webhooks do Mercado Pago.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -10,23 +9,23 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime, timedelta
 
-from config import ADMIN_CHAT_ID, get_logger
+from config import ADMIN_CHAT_ID, PLANOS, get_logger
 from services.pagamento import processar_webhook
-from db.usuarios import carregar_usuario, salvar_usuario
 from services.monitor import atribuir_slot_manha, dias_plano
+from db.database import init_db
+from db.usuarios import carregar_usuario, salvar_usuario, buscar_afiliado, criar_afiliado, confirmar_comissao
+from db.financeiro import init_financeiro, registrar_receita, registrar_comissao
 
 log = get_logger(__name__)
-
 PORT = int(os.getenv("PORT", 8080))
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
-        pass  # silencia logs do servidor HTTP
+        pass
 
     def do_GET(self):
-        # Health check para o Railway
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Fly Bot OK")
@@ -35,18 +34,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", 0))
             body   = json.loads(self.rfile.read(length) or b"{}")
-
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b"OK")
-
-            # Processa em thread separada para não bloquear o servidor
-            threading.Thread(
-                target=_processar_notificacao,
-                args=(body,),
-                daemon=True,
-            ).start()
-
+            threading.Thread(target=_processar_notificacao, args=(body,), daemon=True).start()
         except Exception as e:
             log.error(f"Webhook handler erro: {e}")
             self.send_response(500)
@@ -58,9 +49,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
 
 
 def _processar_notificacao(body: dict):
-    """Libera acesso automaticamente quando MP confirma pagamento."""
     from telegram.bot import enviar
-    from telegram.teclados import teclado_paises
 
     resultado = processar_webhook(body)
     if not resultado:
@@ -70,6 +59,7 @@ def _processar_notificacao(body: dict):
     plano      = resultado["plano"]
     payment_id = resultado["payment_id"]
 
+    # Carrega ou cria usuario
     dados = carregar_usuario(chat_id) or {
         "nome": "Usuário", "status": "aguardando_pagamento",
         "config": {}, "historico": {}, "historico_precos": {},
@@ -77,55 +67,46 @@ def _processar_notificacao(body: dict):
         "proxima_busca": None, "slot_manha": None,
     }
 
-    # Já era ativo? Renovação
-    era_renovacao = dados.get("liberado_em") is not None
-
+    era_renovacao        = dados.get("liberado_em") is not None
     dados["status"]      = "setup_origem"
     dados["plano"]       = plano
     dados["liberado_em"] = datetime.now().isoformat()
     dados["slot_manha"]  = atribuir_slot_manha()
     salvar_usuario(chat_id, dados)
 
-    from config import PLANOS
     p      = PLANOS.get(plano, PLANOS.get("60dias", {}))
     label  = p.get("label", plano)
+    valor  = float(p.get("valor", 0))
     expira = (datetime.now() + timedelta(days=dias_plano(plano))).strftime("%d/%m/%Y")
     nome   = dados.get("nome", "Usuário")
-    tipo   = "🔄 Renovação" if era_renovacao else "✅ Novo acesso"
+    tipo   = "Renovação" if era_renovacao else "Novo acesso"
 
-    # Avisa o admin
-    enviar(ADMIN_CHAT_ID,
-        f"{tipo} — *{nome}*\n"
-        f"ID: `{chat_id}`\n"
-        f"Plano: {label} | Expira: {expira}\n"
-        f"Payment ID: `{payment_id}`\n"
-        "_Liberado automaticamente pelo MP_ ✅"
-    )
-
-    from db.usuarios import buscar_afiliado, criar_afiliado, confirmar_comissao
-    from config import PLANOS as _PLANOS
+    log.info(f"Acesso liberado: {chat_id} | {plano} | payment={payment_id}")
 
     # Registra receita
-    _valor_plano = float(_PLANOS.get(plano, {}).get("valor", 0))
-    registrar_receita(chat_id, nome, plano, _valor_plano, payment_id)
-
-    # Credita comissão ao afiliado que indicou (se houver)
     try:
-        resultado_comissao = confirmar_comissao(chat_id)
-        if resultado_comissao:
-            afiliado_id = resultado_comissao["afiliado_id"]
-            comissao    = resultado_comissao["comissao"]
-            af_dados = buscar_afiliado(afiliado_id)
-            af_nome  = af_dados.get("nome", "afiliado") if af_dados else "afiliado"
-            log.info(f"Comissão creditada: R$ {comissao:.2f} para {afiliado_id} ({af_nome})")
+        registrar_receita(chat_id, nome, plano, valor, payment_id)
+    except Exception as e:
+        log.error(f"Erro registrar_receita: {e}")
+
+    # Credita comissao ao afiliado
+    try:
+        res = confirmar_comissao(chat_id)
+        if res:
+            afiliado_id = str(res["afiliado_id"])
+            comissao    = float(res["comissao"])
+            af          = buscar_afiliado(afiliado_id)
+            af_nome     = af.get("nome", "afiliado") if af else "afiliado"
+
             registrar_comissao(afiliado_id, af_nome, nome, plano, comissao, payment_id)
-            # Avisa o afiliado
+            log.info(f"Comissao: R$ {comissao:.2f} para {af_nome} ({afiliado_id})")
+
             enviar(int(afiliado_id),
                 f"🎉 *Comissão creditada!*\n\n"
-                f"Sua indicação assinou o plano *{label}* e você ganhou *R$ {comissao:.2f}*!\n\n"
+                f"Sua indicação assinou o plano *{label}* "
+                f"e você ganhou *R$ {comissao:.2f}*!\n\n"
                 "Use /carteira para ver seu saldo."
             )
-            # Avisa o admin
             enviar(ADMIN_CHAT_ID,
                 f"💰 *Comissão gerada*\n"
                 f"Afiliado: {af_nome} (`{afiliado_id}`)\n"
@@ -133,27 +114,39 @@ def _processar_notificacao(body: dict):
                 f"Plano: {label} | Comissão: R$ {comissao:.2f}"
             )
     except Exception as e:
-        log.error(f"Erro ao creditar comissão: {e}")
+        log.error(f"Erro creditar comissao: {e}")
 
-    # Garante que o novo usuário já tem registro de afiliado
-    buscar_afiliado(chat_id) or criar_afiliado(chat_id)
+    # Garante afiliado para o novo usuario
+    try:
+        buscar_afiliado(chat_id) or criar_afiliado(chat_id)
+    except Exception as e:
+        log.error(f"Erro criar_afiliado: {e}")
 
-    # Manda mensagem de confirmação com botões
-    markup_pos_pagamento = {"inline_keyboard": [
+    # Avisa admin
+    enviar(ADMIN_CHAT_ID,
+        f"{'🔄' if era_renovacao else '✅'} *{tipo} — {nome}*\n"
+        f"ID: `{chat_id}`\n"
+        f"Plano: {label} | Expira: {expira}\n"
+        f"Valor: R$ {valor:.2f} | Payment: `{payment_id}`\n"
+        "_Liberado automaticamente pelo MP_"
+    )
+
+    # Mensagem para o usuario com botoes
+    markup = {"inline_keyboard": [
         [{"text": "🛠 Configurar Minha Rota", "callback_data": "configurar_rota"}],
         [{"text": "💰 Indique e Ganhe",        "callback_data": "ver_indique"}],
     ]}
     enviar(int(chat_id),
         f"✅ *Pagamento confirmado!*\n\n"
         f"Seu plano de *{label}* está ativo até *{expira}*.\n\n"
-        "O que você deseja fazer agora? Escolha uma das opções abaixo:",
-        reply_markup=markup_pos_pagamento
+        "O que você deseja fazer agora?",
+        reply_markup=markup
     )
-
-    log.info(f"Acesso liberado automaticamente via MP: {chat_id} plano={plano}")
 
 
 def iniciar_servidor():
+    init_db()
+    init_financeiro()
     server = HTTPServer(("0.0.0.0", PORT), WebhookHandler)
     log.info(f"Webhook server rodando na porta {PORT}")
     server.serve_forever()
