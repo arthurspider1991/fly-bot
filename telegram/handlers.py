@@ -10,14 +10,12 @@ from datetime import datetime, date, timedelta
 
 import textos as T
 from config import ADMIN_CHAT_ID, PLANOS, COMISSAO_MINIMO_SAQUE, MP_ACCESS_TOKEN, get_logger
+from db.parceiros import get_ou_criar_parceiro, buscar_parceiro, buscar_parceiro_por_codigo, registrar_acesso, confirmar_venda, solicitar_saque, pagar_saque, listar_saques_pendentes, parceiros_com_saldo, historico_parceiro
 from db.financeiro import (relatorio_geral, extrato_recente, afiliados_com_saldo_detalhado,
                            receita_por_plano, confirmar_saque_mov)
 from db.usuarios import (
     carregar_usuario, salvar_usuario, carregar_todos_usuarios,
     salvar_lead_internacional, listar_leads_internacionais,
-    criar_afiliado, buscar_afiliado, buscar_afiliado_por_codigo,
-    registrar_indicacao, registrar_novo_indicado, zerar_saldo_afiliado,
-    listar_afiliados_com_saldo,
 )
 from telegram.bot import (
     enviar, encaminhar_foto_para_admin, encaminhar_documento_para_admin,
@@ -122,28 +120,28 @@ def _finalizar_setup(chat_id, dados: dict, nome: str) -> None:
 # ── Indique e Ganhe ───────────────────────────────────────────────────────────
 
 def _enviar_indique(chat_id: str):
-    """Manda a mensagem completa de indique e ganhe com botão compartilhar."""
-    af       = buscar_afiliado(chat_id) or criar_afiliado(chat_id)
-    codigo   = af.get("codigo", "") if af else ""
+    """Manda a mensagem de parceiro com link exclusivo."""
+    parceiro = get_ou_criar_parceiro(chat_id)
+    codigo   = parceiro.get("codigo", "")
     bot_user = os.getenv("TELEGRAM_BOT_USERNAME", "seubot")
     link     = f"https://t.me/{bot_user}?start={codigo}"
 
-    from config import PLANOS as P
     comissoes = ""
-    for k, p in P.items():
-        comissoes += f"• {p['label']} — R$ {p.get('comissao', 0):.2f}\n"
+    for k, p in PLANOS.items():
+        com = p.get("comissao", 0)
+        if com > 0:
+            comissoes += f"• {p['label']} — R$ {com:.2f}\n"
 
     markup = {"inline_keyboard": [[
-        {"text": "🔗 Compartilhar meu link", "url": f"https://t.me/share/url?url={link}&text=Monitore+passagens+a%C3%A9reas+e+compre+na+hora+certa%21"}
+        {"text": "🔗 Compartilhar meu link", "url": f"https://t.me/share/url?url={link}&text=Monitore+passagens+aereas+e+compre+na+hora+certa%21"}
     ]]}
     enviar(int(chat_id),
-        "🚀 *Que tal faturar uma grana extra com a gente?*\n\n"
-        "É simples: compartilhe seu link exclusivo com amigos e ganhe uma comissão "
-        "toda vez que alguém assinar um plano!\n\n"
-        f"💰 *Tabela de comissões:*\n{comissoes}\n"
-        "Sua comissão é creditada automaticamente assim que a assinatura for confirmada "
-        "e você pode sacar quando quiser.\n\n"
-        f"🔗 *Seu link exclusivo:*\n`{link}`",
+        "🚀 Que tal faturar uma grana extra com a gente?\n\n"
+        "E simples: compartilhe seu link com amigos e ganhe comissao "
+        "toda vez que alguem assinar um plano!\n\n"
+        f"💰 Tabela de comissoes:\n{comissoes}\n"
+        "Sua comissao e creditada automaticamente assim que a assinatura for confirmada.\n\n"
+        f"🔗 Seu link exclusivo:\n{link}",
         reply_markup=markup
     )
 
@@ -172,16 +170,17 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
         salvar_usuario(chat_id, dados)
         if not is_admin(chat_id):
             enviar(ADMIN_CHAT_ID, T.ADMIN_NOVO_USUARIO.format(nome=nome, chat_id=chat_id))
-            # Registra indicação pendente
+            # Registra rastreamento no novo sistema de parceiros
             if ref_afiliado:
-                af = buscar_afiliado_por_codigo(ref_afiliado)
-                if af:
-                    registrar_novo_indicado(af["chat_id"])
-                    enviar(ADMIN_CHAT_ID,
-                        f"🔗 *Novo indicado via afiliado*\n"
-                        f"Afiliado: `{af['chat_id']}` ({ref_afiliado})\n"
-                        f"Indicado: {nome} (`{chat_id}`)"
-                    )
+                registrou = registrar_acesso(ref_afiliado, chat_id)
+                if registrou:
+                    parceiro = buscar_parceiro_por_codigo(ref_afiliado)
+                    if parceiro:
+                        enviar(ADMIN_CHAT_ID,
+                            f"Link de parceiro\n"
+                            f"Parceiro: {parceiro.get('nome','')} ({parceiro['chat_id']})\n"
+                            f"Indicado: {nome} ({chat_id})"
+                        )
 
     # Atualiza ref_afiliado se veio via link
     if ref_afiliado and not dados.get("ref_afiliado"):
@@ -206,41 +205,20 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
             expira = (datetime.now() + timedelta(days=dias_plano(dados_alvo.get("plano","60dias")))).strftime("%d/%m/%Y")
             enviar(chat_id, T.ADMIN_LIBERADO.format(chat_id=alvo, expira=expira))
             enviar(int(alvo), T.SETUP_LIBERADO, reply_markup=teclado_paises("ori"))
-            # Confirma comissão do afiliado
-            from db.usuarios import confirmar_comissao
-            resultado = confirmar_comissao(alvo)
-            if resultado:
-                af_id    = resultado["afiliado_id"]
-                comissao = resultado["comissao"]
-                af_dados = carregar_usuario(af_id) or {}
-                af_nome  = af_dados.get("nome", af_id)
-                af_info  = buscar_afiliado(af_id)
-                enviar(int(af_id),
-                    f"🎉 *Você ganhou uma comissão!*\n\n"
-                    f"Seu indicado acabou de assinar.\n"
-                    f"💰 *R$ {comissao:.2f}* adicionados à sua carteira!\n\n"
-                    f"Saldo atual: R$ {af_info.get('saldo', comissao):.2f}\n\n"
-                    "Use /indique e ganhe para ver sua carteira."
-                )
-                enviar(ADMIN_CHAT_ID,
-                    f"💰 *Comissão gerada*\nAfiliado: {af_nome} (`{af_id}`)\n"
-                    f"Valor: R$ {comissao:.2f}"
-                )
             if msg_obj and msg_obj.get("message_id"):
                 editar_mensagem_markup(chat_id, msg_obj["message_id"])
             return
 
         if callback_data.startswith("admin_pago:") and is_admin(chat_id):
-            alvo = callback_data.split(":", 1)[1]
-            af   = buscar_afiliado(alvo)
-            if af:
-                saldo = af.get("saldo", 0)
-                zerar_saldo_afiliado(alvo)
-                enviar(chat_id, f"✅ Saldo de R$ {saldo:.2f} zerado para `{alvo}`.")
+            alvo     = callback_data.split(":", 1)[1]
+            parceiro = buscar_parceiro(alvo)
+            if parceiro:
+                saldo = parceiro.get("saldo", 0)
+                enviar(chat_id, f"Saldo de R$ {saldo:.2f} zerado para {alvo}.")
                 enviar(int(alvo),
-                    f"✅ *Transferência recebida!*\n\n"
-                    f"R$ {saldo:.2f} foi transferido para sua chave Pix.\n"
-                    "Obrigado! Continue indicando 🚀"
+                    f"Transferencia recebida!\n\n"
+                    f"R$ {saldo:.2f} transferido para sua chave Pix.\n"
+                    "Obrigado! Continue indicando!"
                 )
                 if msg_obj and msg_obj.get("message_id"):
                     editar_mensagem_markup(chat_id, msg_obj["message_id"])
@@ -573,7 +551,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
         if resultado:
             af_id = resultado["afiliado_id"]
             comissao = resultado["comissao"]
-            af_info = buscar_afiliado(af_id)
+            af_info = buscar_parceiro(af_id) or {}
             enviar(int(af_id),
                 f"🎉 *Comissão recebida!*\nR$ {comissao:.2f} na sua carteira!\n"
                 f"Saldo: R$ {af_info.get('saldo',comissao):.2f}\n\nUse /indique e ganhe"
@@ -689,17 +667,14 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
         return
 
     if texto.startswith("/afiliados"):
-        lista = listar_afiliados_com_saldo()
+        lista = parceiros_com_saldo()
         if not lista:
-            enviar(chat_id, "Nenhum afiliado com saldo ainda."); return
-        linhas = ["💰 *Afiliados:*\n"]
+            enviar(chat_id, "Nenhum parceiro com saldo ainda."); return
+        linhas = ["Parceiros com saldo:\n"]
         for a in lista:
             linhas.append(
-                f"• `{a['chat_id']}` {a.get('nome','?')} | "
-                f"Código: {a['codigo']} | "
-                f"Indicados: {a['total_indicados']} | "
-                f"Pagantes: {a['total_pagantes']} | "
-                f"Saldo: R$ {a['saldo']:.2f}"
+                f"• {a.get('nome','?')} ({a['chat_id']})\n"
+                f"  Codigo: {a['codigo']} | Vendas: {a['total_vendas']} | Saldo: R$ {a['saldo']:.2f}"
             )
         enviar(chat_id, "\n".join(linhas))
         return
@@ -912,47 +887,49 @@ def _processar_usuario(chat_id, texto, dados, nome, status, msg_obj=None):
         return
 
     if texto == "/carteira":
-        af = buscar_afiliado(chat_id)
-        if not af:
-            af = criar_afiliado(chat_id)
-        saldo     = af.get("saldo", 0.0)
-        total     = af.get("total_ganho", 0.0)
-        pagantes  = af.get("total_pagantes", 0)
-        indicados = af.get("total_indicados", 0)
+        hist = historico_parceiro(chat_id)
+        if not hist:
+            get_ou_criar_parceiro(chat_id, nome)
+            hist = historico_parceiro(chat_id)
+        saldo    = hist.get("saldo", 0.0)
+        total    = hist.get("total_ganho", 0.0)
+        vendas   = hist.get("total_vendas", 0)
+        acessos  = hist.get("total_acessos", 0)
         enviar(chat_id,
-            f"💳 *Sua carteira*\n\n"
-            f"• Indicações: {indicados}\n"
-            f"• Confirmadas: {pagantes}\n"
+            f"💳 Sua carteira\n\n"
+            f"• Acessos via link: {acessos}\n"
+            f"• Vendas confirmadas: {vendas}\n"
             f"• Total ganho: R$ {total:.2f}\n"
-            f"• Saldo disponível: *R$ {saldo:.2f}*\n\n"
-            + (f"👉 Use /sacar para transferir seu saldo."
+            f"• Saldo disponivel: R$ {saldo:.2f}\n\n"
+            + (f"Use /sacar para transferir seu saldo."
                if saldo >= COMISSAO_MINIMO_SAQUE
-               else f"_Mínimo para saque: R$ {COMISSAO_MINIMO_SAQUE:.2f}_\n\n"
+               else f"Minimo para saque: R$ {COMISSAO_MINIMO_SAQUE:.2f}\n\n"
                     f"Continue indicando! Use /indicar para pegar seu link.")
         )
         return
 
     if texto == "/sacar":
-        af = buscar_afiliado(chat_id)
-        if not af or af.get("saldo", 0) < COMISSAO_MINIMO_SAQUE:
+        parceiro = buscar_parceiro(chat_id)
+        saldo_disp = parceiro.get("saldo", 0) if parceiro else 0
+        if saldo_disp < COMISSAO_MINIMO_SAQUE:
             enviar(chat_id,
-                f"❌ Saldo insuficiente para saque.\n"
-                f"Mínimo: R$ {COMISSAO_MINIMO_SAQUE:.2f}\n"
-                f"Seu saldo: R$ {af.get('saldo',0):.2f}" if af else
-                f"❌ Você ainda não tem carteira. Use /indique e ganhe primeiro."
+                f"Saldo insuficiente para saque.\n"
+                f"Minimo: R$ {COMISSAO_MINIMO_SAQUE:.2f}\n"
+                f"Seu saldo: R$ {saldo_disp:.2f}\n\n"
+                "Use /indicar para pegar seu link e ganhar comissoes."
             ); return
         dados["status_temp"] = "aguardando_chave_pix"
         salvar_usuario(chat_id, dados)
         enviar(chat_id,
-            f"💳 *Saque — R$ {af['saldo']:.2f}*\n\n"
-            "Digite sua *chave Pix* para receber:"
+            f"Saque — R$ {saldo_disp:.2f}\n\n"
+            "Digite sua chave Pix para receber:"
         )
         return
 
     if dados.get("status_temp") == "aguardando_chave_pix" and texto and not texto.startswith("/"):
         chave_pix = texto.strip()
-        af        = buscar_afiliado(chat_id)
-        saldo     = af.get("saldo", 0) if af else 0
+        parceiro  = buscar_parceiro(chat_id)
+        saldo     = parceiro.get("saldo", 0) if parceiro else 0
         dados.pop("status_temp", None)
         salvar_usuario(chat_id, dados)
         enviar(chat_id,

@@ -13,7 +13,8 @@ from config import ADMIN_CHAT_ID, PLANOS, get_logger
 from services.pagamento import processar_webhook
 from services.monitor import atribuir_slot_manha, dias_plano
 from db.database import init_db
-from db.usuarios import carregar_usuario, salvar_usuario, buscar_afiliado, criar_afiliado, confirmar_comissao
+from db.usuarios import carregar_usuario, salvar_usuario
+from db.parceiros import init_parceiros, confirmar_venda, get_ou_criar_parceiro
 from db.financeiro import init_financeiro, registrar_receita, registrar_comissao
 
 log = get_logger(__name__)
@@ -89,40 +90,36 @@ def _processar_notificacao(body: dict):
     except Exception as e:
         log.error(f"Erro registrar_receita: {e}")
 
-    # Credita comissao ao afiliado
+    # Credita comissao ao parceiro que indicou (se houver)
     try:
-        # Usa a versão que recebe plano e busca comissao do config.py
-        af_id_raw, comissao_raw = confirmar_comissao(chat_id, plano)
-        res = {"afiliado_id": af_id_raw, "comissao": comissao_raw} if af_id_raw else None
-        if res and comissao_raw > 0:
-            afiliado_id = str(res["afiliado_id"])
-            comissao    = float(res["comissao"])
-            af          = buscar_afiliado(afiliado_id)
-            af_nome     = af.get("nome", "afiliado") if af else "afiliado"
+        venda = confirmar_venda(chat_id, plano)
+        if venda:
+            parceiro_id   = venda["parceiro_id"]
+            parceiro_nome = venda["parceiro_nome"]
+            comissao      = venda["comissao"]
 
-            registrar_comissao(afiliado_id, af_nome, nome, plano, comissao, payment_id)
-            log.info(f"Comissao: R$ {comissao:.2f} para {af_nome} ({afiliado_id})")
+            registrar_comissao(parceiro_id, parceiro_nome, nome, plano, comissao, payment_id)
 
-            enviar(int(afiliado_id),
+            enviar(int(parceiro_id),
                 f"🎉 *Comissão creditada!*\n\n"
                 f"Sua indicação assinou o plano *{label}* "
                 f"e você ganhou *R$ {comissao:.2f}*!\n\n"
                 "Use /carteira para ver seu saldo."
             )
             enviar(ADMIN_CHAT_ID,
-                f"💰 *Comissão gerada*\n"
-                f"Afiliado: {af_nome} (`{afiliado_id}`)\n"
-                f"Indicado: {nome} (`{chat_id}`)\n"
-                f"Plano: {label} | Comissão: R$ {comissao:.2f}"
+                f"💰 Comissao gerada\n"
+                f"Parceiro: {parceiro_nome} ({parceiro_id})\n"
+                f"Indicado: {nome} ({chat_id})\n"
+                f"Plano: {label} | Comissao: R$ {comissao:.2f}"
             )
     except Exception as e:
-        log.error(f"Erro creditar comissao: {e}")
+        log.error(f"Erro creditar comissao parceiro: {e}")
 
-    # Garante afiliado para o novo usuario
+    # Garante registro de parceiro para o novo usuario
     try:
-        buscar_afiliado(chat_id) or criar_afiliado(chat_id)
+        get_ou_criar_parceiro(chat_id, nome)
     except Exception as e:
-        log.error(f"Erro criar_afiliado: {e}")
+        log.error(f"Erro get_ou_criar_parceiro: {e}")
 
     # Avisa admin
     enviar(ADMIN_CHAT_ID,
@@ -149,6 +146,7 @@ def _processar_notificacao(body: dict):
 def iniciar_servidor():
     init_db()
     init_financeiro()
+    init_parceiros()
     server = HTTPServer(("0.0.0.0", PORT), WebhookHandler)
     log.info(f"Webhook server rodando na porta {PORT}")
     server.serve_forever()
