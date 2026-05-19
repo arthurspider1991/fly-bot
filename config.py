@@ -19,7 +19,7 @@ MP_PUBLIC_KEY   = os.getenv("MP_PUBLIC_KEY", "")
 PLANOS = {
     "60dias": {
         "label":      "60 dias",
-        "valor":      1.00,
+        "valor":      15.00,
         "dias":       60,
         "comissao":   5.00,
         "descricao":  "Fly Bot — Plano 60 dias",
