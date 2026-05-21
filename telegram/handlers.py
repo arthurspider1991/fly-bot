@@ -12,7 +12,7 @@ import textos as T
 from config import ADMIN_CHAT_ID, PLANOS, COMISSAO_MINIMO_SAQUE, MP_ACCESS_TOKEN, get_logger
 from db.parceiros import get_ou_criar_parceiro, buscar_parceiro, buscar_parceiro_por_codigo, registrar_acesso, confirmar_venda, solicitar_saque, pagar_saque, listar_saques_pendentes, parceiros_com_saldo, historico_parceiro
 from db.financeiro import (relatorio_geral, extrato_recente, afiliados_com_saldo_detalhado,
-                           receita_por_plano, confirmar_saque_mov)
+                           receita_por_plano, confirmar_saque_mov, registrar_saque_mov)
 from db.usuarios import (
     carregar_usuario, salvar_usuario, carregar_todos_usuarios,
     salvar_lead_internacional, listar_leads_internacionais,
@@ -220,17 +220,33 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
                 editar_mensagem_markup(chat_id, msg_obj["message_id"])
             return
 
-        if callback_data.startswith("admin_pago:") and is_admin(chat_id):
-            alvo     = callback_data.split(":", 1)[1]
-            parceiro = buscar_parceiro(alvo)
-            if parceiro:
-                saldo = parceiro.get("saldo", 0)
-                enviar(chat_id, f"Saldo de R$ {saldo:.2f} zerado para {alvo}.")
+        if callback_data.startswith("confirmar_saque:") and is_admin(chat_id):
+            partes   = callback_data.split(":")
+            saque_id = int(partes[1])
+            alvo     = partes[2]
+
+            resultado = pagar_saque(saque_id)
+            if resultado:
+                valor = resultado["valor"]
+                chave = resultado["chave_pix"]
+                # Remove botão da mensagem
+                if msg_obj and msg_obj.get("message_id"):
+                    editar_mensagem_markup(chat_id, msg_obj["message_id"])
+                enviar(chat_id,
+                    f"Pagamento #{saque_id} confirmado!\n"
+                    f"Valor: R$ {valor:.2f}\n"
+                    f"Parceiro: {alvo}"
+                )
                 enviar(int(alvo),
                     f"Transferencia recebida!\n\n"
-                    f"R$ {saldo:.2f} transferido para sua chave Pix.\n"
-                    "Obrigado! Continue indicando!"
+                    f"R$ {valor:.2f} transferido para sua chave Pix ({chave}).\n\n"
+                    "Obrigado! Continue indicando e ganhando!"
                 )
+                # Registra na tabela financeiro
+                registrar_saque_mov(alvo, nome, valor, saque_id)
+                confirmar_saque_mov(saque_id)
+            else:
+                enviar(chat_id, f"Saque #{saque_id} nao encontrado.")
                 if msg_obj and msg_obj.get("message_id"):
                     editar_mensagem_markup(chat_id, msg_obj["message_id"])
             return
@@ -944,24 +960,40 @@ def _processar_usuario(chat_id, texto, dados, nome, status, msg_obj=None):
 
     if dados.get("status_temp") == "aguardando_chave_pix" and texto and not texto.startswith("/"):
         chave_pix = texto.strip()
-        parceiro  = buscar_parceiro(chat_id)
-        saldo     = parceiro.get("saldo", 0) if parceiro else 0
         dados.pop("status_temp", None)
         salvar_usuario(chat_id, dados)
+
+        # Registra saque e zera saldo no banco
+        resultado_saque = solicitar_saque(chat_id, chave_pix)
+
+        if not resultado_saque:
+            enviar(chat_id,
+                f"Saldo insuficiente para saque.\n"
+                f"Minimo: R$ {COMISSAO_MINIMO_SAQUE:.2f}"
+            ); return
+
+        saque_id = resultado_saque["id"]
+        valor    = resultado_saque["valor"]
+
+        # Confirma para o parceiro
         enviar(chat_id,
-            f"✅ Solicitação de saque enviada!\n\n"
-            f"💰 Valor: R$ {saldo:.2f}\n"
-            f"🔑 Chave Pix: `{chave_pix}`\n\n"
-            "_Você receberá a transferência em breve._"
+            f"Solicitacao de saque enviada!\n\n"
+            f"Valor: R$ {valor:.2f}\n"
+            f"Chave Pix: {chave_pix}\n\n"
+            "Voce recebera a transferencia em breve."
         )
+
+        # Notifica admin com botão de confirmar
         markup = {"inline_keyboard": [[
-            {"text": "✅ Transferência concluída", "callback_data": f"admin_pago:{chat_id}"}
+            {"text": "✅ Confirmar pagamento", "callback_data": f"confirmar_saque:{saque_id}:{chat_id}"}
         ]]}
         enviar(ADMIN_CHAT_ID,
-            f"💸 *Solicitação de saque*\n\n"
-            f"👤 {nome} (`{chat_id}`)\n"
-            f"💰 Valor: *R$ {saldo:.2f}*\n"
-            f"🔑 Chave Pix: `{chave_pix}`",
+            f"SAQUE SOLICITADO\n\n"
+            f"Parceiro: {nome}\n"
+            f"ID: {chat_id}\n"
+            f"Valor: R$ {valor:.2f}\n"
+            f"Chave Pix: {chave_pix}\n\n"
+            f"Saque ID: #{saque_id}",
             reply_markup=markup
         )
         return

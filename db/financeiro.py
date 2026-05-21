@@ -158,7 +158,7 @@ def relatorio_geral() -> dict:
     ).fetchone()[0]
 
     afiliados_com_saldo = conn.execute(
-        "SELECT COUNT(*) FROM afiliados WHERE saldo > 0"
+        "SELECT COUNT(*) FROM parceiros WHERE saldo > 0"
     ).fetchone()[0]
 
     saques_pendentes_valor = conn.execute(
