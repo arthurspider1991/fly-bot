@@ -182,10 +182,21 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
                             f"Indicado: {nome} ({chat_id})"
                         )
 
-    # Atualiza ref_afiliado se veio via link
-    if ref_afiliado and not dados.get("ref_afiliado"):
-        dados["ref_afiliado"] = ref_afiliado
-        salvar_usuario(chat_id, dados)
+    # Registra rastreamento mesmo se usuário já existe
+    if ref_afiliado:
+        if not dados.get("ref_afiliado"):
+            dados["ref_afiliado"] = ref_afiliado
+            salvar_usuario(chat_id, dados)
+        # Tenta registrar acesso (ignora se já foi registrado)
+        registrou = registrar_acesso(ref_afiliado, chat_id)
+        if registrou:
+            parceiro = buscar_parceiro_por_codigo(ref_afiliado)
+            if parceiro and not is_admin(chat_id):
+                enviar(ADMIN_CHAT_ID,
+                    f"Link de parceiro\n"
+                    f"Parceiro: {parceiro.get('nome','')} ({parceiro['chat_id']})\n"
+                    f"Indicado: {nome} ({chat_id})"
+                )
 
     status = dados["status"]
 
@@ -307,8 +318,10 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
 
     # ── Admin ──────────────────────────────────────────────────────────────────
     if is_admin(chat_id):
-        _processar_admin(chat_id, texto, nome, dados, msg_obj)
-        return
+        # Processa comandos admin - se retornar True, o comando foi tratado
+        # Se retornar False/None, continua para processar como usuário também
+        if _processar_admin(chat_id, texto, nome, dados, msg_obj):
+            return
 
     # ── Comprovante ────────────────────────────────────────────────────────────
     if status in ("aguardando_comprovante", "aguardando_liberacao") and msg_obj:
@@ -527,7 +540,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
         salvar_usuario(alvo, dados_alvo)
         enviar(chat_id, f"🔄 Usuário `{alvo}` resetado.")
         enviar(int(alvo), "🔄 Sua conta foi resetada.")
-        return
+        return True
 
     if texto.startswith("/liberar"):
         partes = texto.split()
@@ -556,7 +569,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
                 f"🎉 *Comissão recebida!*\nR$ {comissao:.2f} na sua carteira!\n"
                 f"Saldo: R$ {af_info.get('saldo',comissao):.2f}\n\nUse /indique e ganhe"
             )
-        return
+        return True
 
     if texto == "/financeiro":
         r = relatorio_geral()
@@ -576,7 +589,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
             f"Por plano:\n{linhas_plano}\n"
             "/extrato /afiliados_saldo /pagar_saque"
         )
-        return
+        return True
 
     if texto == "/extrato":
         movs = extrato_recente(30)
@@ -589,7 +602,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
             sinal = EMOJI.get(m["tipo"], "")
             linhas.append(f"{dt} | {m['tipo']} | {sinal}R$ {m['valor']:.2f} | {m['status']}\n{m['descricao']}")
         enviar(chat_id, "\n\n".join(linhas))
-        return
+        return True
 
     if texto == "/afiliados_saldo":
         lista = afiliados_com_saldo_detalhado()
@@ -606,7 +619,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
                 f"  Pix: {pix}"
             )
         enviar(chat_id, "\n".join(linhas))
-        return
+        return True
 
     if texto.startswith("/pagar_saque"):
         partes = texto.split()
@@ -620,7 +633,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
             enviar(chat_id, f"Saque #{saque_id} marcado como pago.")
         except Exception as e:
             enviar(chat_id, f"Erro: {e}")
-        return
+        return True
 
     if texto.startswith("/bloquear"):
         partes = texto.split()
@@ -635,7 +648,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
             enviar(int(alvo), T.ACESSO_SUSPENSO)
         else:
             enviar(chat_id, T.ADMIN_NAO_ENCONTRADO.format(chat_id=alvo))
-        return
+        return True
 
     if texto.startswith("/usuarios"):
         if not todos:
@@ -650,7 +663,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
             emoji = "🔴" if (dias is not None and dias<=3) else ("🟡" if (dias is not None and dias<=7) else "🟢")
             linhas.append(f"{emoji} `{uid}` {u.get('nome','?')} | {u.get('status','?')} | {rota}{ass}")
         enviar(chat_id, "\n".join(linhas))
-        return
+        return True
 
     if texto.startswith("/vencendo"):
         from services.monitor import dias_restantes_assinatura as dra
@@ -664,7 +677,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
             emoji = "🔴" if dias<=1 else ("🟡" if dias<=3 else "🟠")
             linhas.append(f"{emoji} `{uid}` {nome_u} — {dias}d")
         enviar(chat_id, "\n".join(linhas))
-        return
+        return True
 
     if texto.startswith("/afiliados"):
         lista = parceiros_com_saldo()
@@ -677,7 +690,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
                 f"  Codigo: {a['codigo']} | Vendas: {a['total_vendas']} | Saldo: R$ {a['saldo']:.2f}"
             )
         enviar(chat_id, "\n".join(linhas))
-        return
+        return True
 
     if texto.startswith("/leads"):
         leads = listar_leads_internacionais()
@@ -688,7 +701,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
             data = l['criado_em'][:10] if l.get('criado_em') else '?'
             linhas.append(f"• {l['nome']} (`{l['chat_id']}`) — {l['destino']} — {data}")
         enviar(chat_id, "\n".join(linhas))
-        return
+        return True
 
     if texto.startswith("/forcarbusca"):
         enviar(chat_id, T.ADMIN_BUSCA_INICIADA)
@@ -696,7 +709,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
             if u.get("status") == "ativo":
                 threading.Thread(target=executar_ciclo_usuario, args=(uid,"normal"), daemon=True).start()
                 time.sleep(30)
-        return
+        return True
 
     if texto.startswith("/broadcast "):
         msg_texto = texto[len("/broadcast "):].strip()
@@ -704,7 +717,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
             enviar(chat_id, "❌ Use: `/broadcast <mensagem>`"); return
         enviados = sum(1 for uid,u in todos.items() if u.get("status")=="ativo" and not enviar(int(uid), msg_texto) is None and not time.sleep(0.3))
         enviar(chat_id, f"✅ Enviado para *{sum(1 for u in todos.values() if u.get('status')=='ativo')}* ativos.")
-        return
+        return True
 
     if texto.startswith("/broadcast_pendentes "):
         msg_texto = texto[len("/broadcast_pendentes "):].strip()
@@ -713,7 +726,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
             if u.get("status") == "aguardando_pagamento":
                 enviar(int(uid), msg_texto); enviados += 1; time.sleep(0.3)
         enviar(chat_id, f"✅ Enviado para *{enviados}* pendentes.")
-        return
+        return True
 
     if texto.startswith("/broadcast_todos "):
         msg_texto = texto[len("/broadcast_todos "):].strip()
@@ -721,7 +734,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
         for uid in todos:
             enviar(int(uid), msg_texto); enviados += 1; time.sleep(0.3)
         enviar(chat_id, f"✅ Enviado para *{enviados}* usuários.")
-        return
+        return True
 
     if texto.startswith("/campanha"):
         markup = {"inline_keyboard": [[{"text": "🚀 Começar monitoramento", "callback_data": "campanha_iniciar"}]]}
@@ -734,7 +747,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
                     "👇 Clique para começar:",
                     reply_markup=markup); enviados += 1; time.sleep(0.3)
         enviar(chat_id, f"✅ Campanha enviada para *{enviados}* pendentes.")
-        return
+        return True
 
     if texto.startswith("/msg "):
         partes = texto.split(" ", 2)
@@ -745,7 +758,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
         nome_alvo  = (dados_alvo or {}).get("nome", alvo)
         enviar(int(alvo), msg_texto)
         enviar(chat_id, f"✅ Mensagem enviada para *{nome_alvo}* (`{alvo}`).")
-        return
+        return True
 
     if msg_obj and msg_obj.get("photo") and is_admin(chat_id):
         legenda = (msg_obj.get("caption") or "").strip()
@@ -774,7 +787,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
                 enviar(chat_id, "❌ Use: `/img ativos|pendentes|todos [texto]`"); return
             n = _enviar_foto_grupo(filtro, caption)
             enviar(chat_id, f"✅ Imagem enviada para *{n}* usuários ({filtro}).")
-            return
+            return True
         if legenda.startswith("/img_user "):
             partes  = legenda.split(" ", 2)
             alvo    = partes[1] if len(partes)>1 else ""
@@ -787,7 +800,7 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
             )
             nome_alvo = (carregar_usuario(alvo) or {}).get("nome", alvo)
             enviar(chat_id, f"✅ Imagem enviada para *{nome_alvo}* (`{alvo}`).")
-            return
+            return True
 
     if texto in ("/start", "/ajuda", "/help"):
         enviar(chat_id,
@@ -809,6 +822,9 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
             "`/img_user <id> [txt]` — foto individual\n\n"
             f"Seu ID: `{chat_id}`"
         )
+        return True  # comando admin tratado
+
+    return False  # não era comando admin, continua como usuário
 
 
 def _processar_comprovante(chat_id, msg_obj, dados, nome, status):
