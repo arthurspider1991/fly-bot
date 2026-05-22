@@ -593,18 +593,20 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
         linhas_plano = ""
         for p in por_plano:
             linhas_plano += f"  {p['plano']}: {p['qtd']}x  R$ {p['total']:.2f}\n"
-        enviar(chat_id,
-            "📊 Resumo Financeiro\n\n"
+        msg = (
+            f"Resumo Financeiro\n"
+            f"{'='*20}\n\n"
             f"Receita total: R$ {r['receita_total']:.2f}\n"
             f"Assinaturas: {r['total_assinaturas']}\n\n"
             f"Comissoes a pagar: R$ {r['comissoes_pendentes']:.2f}\n"
             f"Comissoes pagas: R$ {r['comissoes_pagas']:.2f}\n"
             f"Saques pendentes: R$ {r['saques_pendentes_valor']:.2f}\n\n"
             f"Lucro liquido: R$ {r['lucro_liquido']:.2f}\n\n"
-            f"Afiliados com saldo: {r['afiliados_com_saldo']}\n\n"
+            f"Parceiros com saldo: {r['afiliados_com_saldo']}\n\n"
             f"Por plano:\n{linhas_plano}\n"
-            "/extrato /afiliados_saldo /pagar_saque"
+            "/extrato   /afiliados saldo   /pagar saque"
         )
+        enviar(chat_id, msg)
         return True
 
     if texto == "/extrato":
@@ -670,15 +672,30 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
         if not todos:
             enviar(chat_id, T.ADMIN_NENHUM_USUARIO); return
         from services.monitor import dias_restantes_assinatura as dra
-        linhas = ["👥 *Usuários:*\n"]
+        ativos    = 0
+        pendentes = 0
+        linhas    = ["Usuarios:\n"]
         for uid, u in todos.items():
-            cfg   = u.get("config", {})
-            rota  = f"{cfg.get('origem','?')}->{cfg.get('destino','?')}" if cfg.get("origem") else "sem rota"
-            dias  = dra(u)
-            ass   = f" | {dias}d" if dias is not None else ""
-            emoji = "🔴" if (dias is not None and dias<=3) else ("🟡" if (dias is not None and dias<=7) else "🟢")
-            linhas.append(f"{emoji} `{uid}` {u.get('nome','?')} | {u.get('status','?')} | {rota}{ass}")
-        enviar(chat_id, "\n".join(linhas))
+            cfg    = u.get("config", {})
+            rota   = f"{cfg.get('origem','?')}->{cfg.get('destino','?')}" if cfg.get("origem") else "sem rota"
+            dias   = dra(u)
+            ass    = f" {dias}d" if dias is not None else ""
+            status = u.get("status","?")
+            emoji  = "🔴" if (dias is not None and dias<=3) else ("🟡" if (dias is not None and dias<=7) else "🟢")
+            if status == "ativo": ativos += 1
+            else: pendentes += 1
+            nome_u = (u.get("nome") or "?").replace("*","").replace("`","").replace("_","")
+            linhas.append(f"{emoji} {uid} {nome_u} {status} {rota}{ass}")
+        linhas.insert(1, f"Ativos: {ativos} | Pendentes: {pendentes}\n")
+        # Envia em blocos de 30 para não ultrapassar limite do Telegram
+        bloco = []
+        for i, linha in enumerate(linhas):
+            bloco.append(linha)
+            if len(bloco) >= 30:
+                enviar(chat_id, "\n".join(bloco))
+                bloco = []
+        if bloco:
+            enviar(chat_id, "\n".join(bloco))
         return True
 
     if texto.startswith("/vencendo"):
