@@ -134,21 +134,13 @@ def _enviar_indique(chat_id: str):
             comissoes += f"• {p['label']} — R$ {com:.2f}\n"
 
 
-    share_url = f"https://t.me/share/url?url={link}&text=Monitore+passagens+aereas+e+compre+na+hora+certa%21"
-    markup = {"inline_keyboard": [
-        [{"text": "🔗 Compartilhar meu link", "url": share_url}],
-        [{"text": "📋 Copiar meu link", "callback_data": f"copiar_link:{chat_id}"}],
-    ]}
-    # Manda sem parse_mode para o link nao perder underscores
-    from telegram.bot import enviar_sem_markdown
     enviar_sem_markdown(int(chat_id),
-        "🚀 Que tal faturar uma grana extra com a gente?\n\n"
+        "Que tal faturar uma grana extra com a gente?\n\n"
         "E simples: compartilhe seu link com amigos e ganhe comissao "
         "toda vez que alguem assinar um plano!\n\n"
         f"Tabela de comissoes:\n{comissoes}\n"
         "Sua comissao e creditada automaticamente assim que a assinatura for confirmada.\n\n"
-        f"Seu link exclusivo:\n{link}",
-        reply_markup=markup
+        f"Seu link exclusivo (copie e compartilhe):\n{link}"
     )
 
 # ── Handler principal ─────────────────────────────────────────────────────────
