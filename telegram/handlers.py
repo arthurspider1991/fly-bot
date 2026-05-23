@@ -135,12 +135,12 @@ def _enviar_indique(chat_id: str):
 
 
     enviar_sem_markdown(int(chat_id),
-        "🚀Que tal faturar uma grana extra com a gente?\n\n"
-        "E simples: compartilhe seu link com amigos e ganhe comissão "
+        "Que tal faturar uma grana extra com a gente?\n\n"
+        "E simples: compartilhe seu link com amigos e ganhe comissao "
         "toda vez que alguem assinar um plano!\n\n"
-        f"💰Tabela de comissões:\n{comissoes}\n"
-        "Sua comissão é creditada automaticamente assim que a assinatura for confirmada.\n\n"
-        f"🔗 Seu link exclusivo (copie e compartilhe):\n{link}"
+        f"Tabela de comissoes:\n{comissoes}\n"
+        "Sua comissao e creditada automaticamente assim que a assinatura for confirmada.\n\n"
+        f"Seu link exclusivo (copie e compartilhe):\n{link}"
     )
 
 # ── Handler principal ─────────────────────────────────────────────────────────
@@ -338,10 +338,46 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
             _processar_navegacao(chat_id, callback_data, dados, nome, status)
             return
 
+    # ── status_temp (ex: aguardando_chave_pix) — processa ANTES do admin ───────
+    if dados.get("status_temp") == "aguardando_chave_pix" and texto and not texto.startswith("/"):
+        chave_pix = texto.strip()
+        dados.pop("status_temp", None)
+        salvar_usuario(chat_id, dados)
+
+        resultado_saque = solicitar_saque(chat_id, chave_pix)
+
+        if not resultado_saque:
+            enviar(chat_id,
+                f"Saldo insuficiente para saque.\n"
+                f"Minimo: R$ {COMISSAO_MINIMO_SAQUE:.2f}"
+            ); return
+
+        saque_id = resultado_saque["id"]
+        valor    = resultado_saque["valor"]
+
+        enviar(chat_id,
+            f"Solicitacao de saque enviada!\n\n"
+            f"Valor: R$ {valor:.2f}\n"
+            f"Chave Pix: {chave_pix}\n\n"
+            "Voce recebera a transferencia em breve."
+        )
+
+        markup = {"inline_keyboard": [[
+            {"text": "✅ Confirmar pagamento", "callback_data": f"confirmar_saque:{saque_id}:{chat_id}"}
+        ]]}
+        enviar(ADMIN_CHAT_ID,
+            f"💸 SAQUE SOLICITADO\n\n"
+            f"Parceiro: {nome}\n"
+            f"ID: {chat_id}\n"
+            f"Valor: R$ {valor:.2f}\n"
+            f"Chave Pix: {chave_pix}\n\n"
+            f"Saque ID: #{saque_id}",
+            reply_markup=markup
+        )
+        return
+
     # ── Admin ──────────────────────────────────────────────────────────────────
     if is_admin(chat_id):
-        # Processa comandos admin - se retornar True, o comando foi tratado
-        # Se retornar False/None, continua para processar como usuário também
         if _processar_admin(chat_id, texto, nome, dados, msg_obj):
             return
 
@@ -981,45 +1017,7 @@ def _processar_usuario(chat_id, texto, dados, nome, status, msg_obj=None):
         )
         return
 
-    if dados.get("status_temp") == "aguardando_chave_pix" and texto and not texto.startswith("/"):
-        chave_pix = texto.strip()
-        dados.pop("status_temp", None)
-        salvar_usuario(chat_id, dados)
 
-        # Registra saque e zera saldo no banco
-        resultado_saque = solicitar_saque(chat_id, chave_pix)
-
-        if not resultado_saque:
-            enviar(chat_id,
-                f"Saldo insuficiente para saque.\n"
-                f"Minimo: R$ {COMISSAO_MINIMO_SAQUE:.2f}"
-            ); return
-
-        saque_id = resultado_saque["id"]
-        valor    = resultado_saque["valor"]
-
-        # Confirma para o parceiro
-        enviar(chat_id,
-            f"Solicitacao de saque enviada!\n\n"
-            f"Valor: R$ {valor:.2f}\n"
-            f"Chave Pix: {chave_pix}\n\n"
-            "Voce recebera a transferencia em breve."
-        )
-
-        # Notifica admin com botão de confirmar
-        markup = {"inline_keyboard": [[
-            {"text": "✅ Confirmar pagamento", "callback_data": f"confirmar_saque:{saque_id}:{chat_id}"}
-        ]]}
-        enviar(ADMIN_CHAT_ID,
-            f"SAQUE SOLICITADO\n\n"
-            f"Parceiro: {nome}\n"
-            f"ID: {chat_id}\n"
-            f"Valor: R$ {valor:.2f}\n"
-            f"Chave Pix: {chave_pix}\n\n"
-            f"Saque ID: #{saque_id}",
-            reply_markup=markup
-        )
-        return
 
     if texto == "/reconfigurar" and status == "ativo":
         dados["status"] = "setup_origem"
