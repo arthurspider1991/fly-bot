@@ -135,12 +135,12 @@ def _enviar_indique(chat_id: str):
 
 
     enviar_sem_markdown(int(chat_id),
-        "Que tal faturar uma grana extra com a gente?\n\n"
-        "E simples: compartilhe seu link com amigos e ganhe comissao "
+        "🚀Que tal faturar uma grana extra com a gente?\n\n"
+        "E simples: compartilhe seu link com amigos e ganhe comissão "
         "toda vez que alguem assinar um plano!\n\n"
-        f"Tabela de comissoes:\n{comissoes}\n"
-        "Sua comissao e creditada automaticamente assim que a assinatura for confirmada.\n\n"
-        f"Seu link exclusivo (copie e compartilhe):\n{link}"
+        f"💰Tabela de comissões:\n{comissoes}\n"
+        "Sua comissão é creditada automaticamente assim que a assinatura for confirmada.\n\n"
+        f"🔗 Seu link exclusivo (copie e compartilhe):\n{link}"
     )
 
 # ── Handler principal ─────────────────────────────────────────────────────────
