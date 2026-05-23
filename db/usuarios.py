@@ -55,11 +55,18 @@ def salvar_usuario(chat_id, dados: dict) -> None:
     chat_id = str(chat_id)
     with _lock:
         conn = get_conn()
+        # Migração suave: adiciona status_temp se não existir
+        try:
+            conn.execute("ALTER TABLE usuarios ADD COLUMN status_temp TEXT")
+            conn.commit()
+        except:
+            pass
+
         conn.execute("""
             INSERT INTO usuarios
                 (chat_id, nome, status, config, historico, historico_precos,
-                 liberado_em, plano, proxima_busca, slot_manha)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
+                 liberado_em, plano, proxima_busca, slot_manha, status_temp)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(chat_id) DO UPDATE SET
                 nome             = excluded.nome,
                 status           = excluded.status,
@@ -69,7 +76,8 @@ def salvar_usuario(chat_id, dados: dict) -> None:
                 liberado_em      = excluded.liberado_em,
                 plano            = excluded.plano,
                 proxima_busca    = excluded.proxima_busca,
-                slot_manha       = excluded.slot_manha
+                slot_manha       = excluded.slot_manha,
+                status_temp      = excluded.status_temp
         """, (
             chat_id,
             dados.get("nome", ""),
@@ -81,6 +89,7 @@ def salvar_usuario(chat_id, dados: dict) -> None:
             dados.get("plano", "1mes"),
             dados.get("proxima_busca"),
             dados.get("slot_manha"),
+            dados.get("status_temp"),
         ))
         conn.commit()
         conn.close()

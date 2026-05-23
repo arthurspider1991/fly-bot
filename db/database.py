@@ -40,7 +40,8 @@ def init_db() -> None:
                 liberado_em      TEXT,
                 plano            TEXT DEFAULT '1mes',
                 proxima_busca    TEXT,
-                slot_manha       TEXT
+                slot_manha       TEXT,
+                status_temp      TEXT
             )
         """)
         conn.execute("""
