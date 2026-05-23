@@ -37,6 +37,25 @@ def enviar(chat_id, texto: str, reply_markup=None):
         return None
 
 
+def enviar_sem_markdown(chat_id, texto: str, reply_markup=None):
+    """Envia mensagem sem parse_mode — preserva underscores em URLs."""
+    url     = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id":                  chat_id,
+        "text":                     texto,
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = json.dumps(reply_markup)
+    try:
+        r = requests.post(url, json=payload, timeout=15)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        log.error(f"Erro enviar_sem_markdown {chat_id}: {e}")
+        return None
+
+
 def encaminhar_foto_para_admin(chat_id_destino, file_id: str, caption: str, reply_markup=None):
     url     = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
     payload = {"chat_id": chat_id_destino, "photo": file_id,

@@ -18,7 +18,7 @@ from db.usuarios import (
     salvar_lead_internacional, listar_leads_internacionais,
 )
 from telegram.bot import (
-    enviar, encaminhar_foto_para_admin, encaminhar_documento_para_admin,
+    enviar, enviar_sem_markdown, encaminhar_foto_para_admin, encaminhar_documento_para_admin,
     editar_mensagem_markup, is_admin,
 )
 from telegram.teclados import (
@@ -133,16 +133,21 @@ def _enviar_indique(chat_id: str):
         if com > 0:
             comissoes += f"• {p['label']} — R$ {com:.2f}\n"
 
-    markup = {"inline_keyboard": [[
-        {"text": "🔗 Compartilhar meu link", "url": f"https://t.me/share/url?url={link}&text=Monitore+passagens+aereas+e+compre+na+hora+certa%21"}
-    ]]}
-    enviar(int(chat_id),
+
+    share_url = f"https://t.me/share/url?url={link}&text=Monitore+passagens+aereas+e+compre+na+hora+certa%21"
+    markup = {"inline_keyboard": [
+        [{"text": "🔗 Compartilhar meu link", "url": share_url}],
+        [{"text": "📋 Copiar meu link", "callback_data": f"copiar_link:{chat_id}"}],
+    ]}
+    # Manda sem parse_mode para o link nao perder underscores
+    from telegram.bot import enviar_sem_markdown
+    enviar_sem_markdown(int(chat_id),
         "🚀 Que tal faturar uma grana extra com a gente?\n\n"
         "E simples: compartilhe seu link com amigos e ganhe comissao "
         "toda vez que alguem assinar um plano!\n\n"
-        f"💰 Tabela de comissoes:\n{comissoes}\n"
+        f"Tabela de comissoes:\n{comissoes}\n"
         "Sua comissao e creditada automaticamente assim que a assinatura for confirmada.\n\n"
-        f"🔗 Seu link exclusivo:\n{link}",
+        f"Seu link exclusivo:\n{link}",
         reply_markup=markup
     )
 
@@ -254,6 +259,14 @@ def processar_mensagem(chat_id, texto: str, nome: str, msg_obj=None, callback_da
 
         if callback_data == "configurar_rota":
             enviar(chat_id, T.SETUP_LIBERADO, reply_markup=teclado_paises("ori"))
+            return
+
+        if callback_data.startswith("copiar_link:"):
+            uid  = callback_data.split(":")[1]
+            parc = get_ou_criar_parceiro(uid)
+            bot_user = os.getenv("TELEGRAM_BOT_USERNAME", "seubot").strip()
+            link = f"https://t.me/{bot_user}?start={parc.get('codigo','')}"
+            enviar_sem_markdown(chat_id, f"Seu link:\n{link}")
             return
 
         if callback_data == "ver_indique":
