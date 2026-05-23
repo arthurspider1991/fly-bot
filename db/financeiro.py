@@ -131,52 +131,62 @@ def confirmar_saque_mov(saque_id: int):
 
 def relatorio_geral() -> dict:
     """
-    Retorna resumo financeiro completo:
-    - receita_total: tudo que entrou
-    - comissoes_pendentes: a pagar para afiliados
-    - comissoes_pagas: já sacadas
-    - lucro_liquido: receita - comissões pendentes - comissões pagas
-    - total_assinaturas: quantidade de pagamentos
-    - total_afiliados_com_saldo: quantos têm saldo a receber
+    Resumo financeiro usando fontes corretas:
+    - receita_total      : tabela movimentacoes (receitas confirmadas)
+    - comissoes_geradas  : tabela vendas_parceiros (total gerado para parceiros)
+    - saques_pagos       : tabela saques_parceiros status=pago
+    - saques_pendentes   : tabela saques_parceiros status=pendente
+    - saldo_parceiros    : soma do saldo atual de todos parceiros
+    - lucro_liquido      : receita - total comissoes geradas
     """
     conn = get_conn()
 
     receita_total = conn.execute(
-        "SELECT COALESCE(SUM(valor), 0) FROM movimentacoes WHERE tipo = 'receita' AND status = 'confirmado'"
-    ).fetchone()[0]
-
-    comissoes_pendentes = conn.execute(
-        "SELECT COALESCE(SUM(valor), 0) FROM movimentacoes WHERE tipo = 'comissao' AND status = 'pendente'"
-    ).fetchone()[0]
-
-    comissoes_pagas = conn.execute(
-        "SELECT COALESCE(SUM(valor), 0) FROM movimentacoes WHERE tipo = 'saque' AND status = 'pago'"
+        "SELECT COALESCE(SUM(valor), 0) FROM movimentacoes WHERE tipo='receita' AND status='confirmado'"
     ).fetchone()[0]
 
     total_assinaturas = conn.execute(
-        "SELECT COUNT(*) FROM movimentacoes WHERE tipo = 'receita' AND status = 'confirmado'"
+        "SELECT COUNT(*) FROM movimentacoes WHERE tipo='receita' AND status='confirmado'"
     ).fetchone()[0]
 
-    afiliados_com_saldo = conn.execute(
+    # Total de comissoes geradas para parceiros (vendas confirmadas)
+    comissoes_geradas = conn.execute(
+        "SELECT COALESCE(SUM(comissao), 0) FROM vendas_parceiros WHERE status='confirmado'"
+    ).fetchone()[0]
+
+    # Saques já pagos pelo admin
+    saques_pagos = conn.execute(
+        "SELECT COALESCE(SUM(valor), 0) FROM saques_parceiros WHERE status='pago'"
+    ).fetchone()[0]
+
+    # Saques solicitados aguardando pagamento
+    saques_pendentes = conn.execute(
+        "SELECT COALESCE(SUM(valor), 0) FROM saques_parceiros WHERE status='pendente'"
+    ).fetchone()[0]
+
+    # Saldo atual em carteira dos parceiros (ainda nao sacado)
+    saldo_parceiros = conn.execute(
+        "SELECT COALESCE(SUM(saldo), 0) FROM parceiros"
+    ).fetchone()[0]
+
+    parceiros_com_saldo = conn.execute(
         "SELECT COUNT(*) FROM parceiros WHERE saldo > 0"
-    ).fetchone()[0]
-
-    saques_pendentes_valor = conn.execute(
-        "SELECT COALESCE(SUM(valor), 0) FROM movimentacoes WHERE tipo = 'saque' AND status = 'pendente'"
     ).fetchone()[0]
 
     conn.close()
 
-    lucro_liquido = receita_total - comissoes_pendentes - comissoes_pagas
+    # Lucro = receita menos tudo que foi ou sera pago a parceiros
+    lucro_liquido = receita_total - comissoes_geradas
 
     return {
-        "receita_total":          receita_total,
-        "comissoes_pendentes":    comissoes_pendentes,
-        "comissoes_pagas":        comissoes_pagas,
-        "saques_pendentes_valor": saques_pendentes_valor,
-        "lucro_liquido":          lucro_liquido,
-        "total_assinaturas":      total_assinaturas,
-        "afiliados_com_saldo":    afiliados_com_saldo,
+        "receita_total":       receita_total,
+        "total_assinaturas":   total_assinaturas,
+        "comissoes_geradas":   comissoes_geradas,
+        "saques_pagos":        saques_pagos,
+        "saques_pendentes":    saques_pendentes,
+        "saldo_parceiros":     saldo_parceiros,
+        "lucro_liquido":       lucro_liquido,
+        "parceiros_com_saldo": parceiros_com_saldo,
     }
 
 
