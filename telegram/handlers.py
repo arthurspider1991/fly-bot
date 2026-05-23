@@ -123,7 +123,8 @@ def _enviar_indique(chat_id: str):
     """Manda a mensagem de parceiro com link exclusivo."""
     parceiro = get_ou_criar_parceiro(chat_id)
     codigo   = parceiro.get("codigo", "")
-    bot_user = os.getenv("TELEGRAM_BOT_USERNAME", "seubot")
+    bot_user = os.getenv("TELEGRAM_BOT_USERNAME", "seubot").strip()
+    log.info(f"BOT_USERNAME lido: '{bot_user}' | codigo: {codigo}")
     link     = f"https://t.me/{bot_user}?start={codigo}"
 
     comissoes = ""
