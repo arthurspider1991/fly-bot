@@ -349,6 +349,21 @@ def listar_saques_pendentes() -> list:
 # RELATÓRIOS
 # ══════════════════════════════════════════════════════════════════════════════
 
+def listar_todos_parceiros() -> list:
+    """Lista todos os parceiros com métricas completas."""
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT
+            p.chat_id, p.nome, p.codigo, p.saldo, p.total_ganho,
+            p.total_vendas, p.criado_em,
+            (SELECT COUNT(*) FROM rastreamento r WHERE r.parceiro_id = p.chat_id) as total_acessos
+        FROM parceiros p
+        ORDER BY p.total_vendas DESC, p.total_ganho DESC
+    """).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def parceiros_com_saldo() -> list:
     conn = get_conn()
     rows = conn.execute("""

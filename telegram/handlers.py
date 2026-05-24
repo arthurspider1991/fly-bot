@@ -755,15 +755,56 @@ def _processar_admin(chat_id, texto, nome, dados, msg_obj=None):
         enviar(chat_id, "\n".join(linhas))
         return True
 
-    if texto.startswith("/afiliados"):
-        lista = parceiros_com_saldo()
+    if texto.startswith("/parceiros") or texto.startswith("/afiliados"):
+        from db.parceiros import listar_todos_parceiros
+        lista = listar_todos_parceiros()
         if not lista:
-            enviar(chat_id, "Nenhum parceiro com saldo ainda."); return
-        linhas = ["Parceiros com saldo:\n"]
-        for a in lista:
+            enviar(chat_id, "Nenhum parceiro ainda."); return True
+
+        efetivos  = [p for p in lista if p["total_vendas"] > 0]
+        com_acesso = [p for p in lista if p["total_vendas"] == 0]
+
+        linhas = [
+            f"Parceiros — Total: {len(lista)}",
+            f"Efetivos (com vendas): {len(efetivos)}",
+            f"Sem vendas ainda: {len(com_acesso)}",
+            ""
+        ]
+
+        if efetivos:
+            linhas.append("== COM VENDAS ==")
+            for p in efetivos:
+                linhas.append(
+                    f"{p.get('nome','?')} ({p['chat_id']})"
+                    f"  Acessos: {p['total_acessos']} | Vendas: {p['total_vendas']}"
+                    f"  Ganho: R$ {p['total_ganho']:.2f} | Saldo: R$ {p['saldo']:.2f}"
+                )
+
+        if com_acesso:
+            linhas.append("")
+            linhas.append("== SEM VENDAS AINDA ==")
+            for p in com_acesso:
+                linhas.append(
+                    f"{p.get('nome','?')} ({p['chat_id']})"
+                    f"  Acessos via link: {p['total_acessos']}"
+                )
+
+        enviar(chat_id, "\n".join(linhas))
+        return True
+
+    if texto == "/rank":
+        from db.parceiros import listar_todos_parceiros
+        lista = [p for p in listar_todos_parceiros() if p["total_vendas"] > 0]
+        if not lista:
+            enviar(chat_id, "Nenhum parceiro com vendas ainda."); return True
+        lista.sort(key=lambda x: x["total_vendas"], reverse=True)
+        linhas = ["Rank de Parceiros\n"]
+        medalhas = ["1", "2", "3"]
+        for i, p in enumerate(lista[:10]):
+            pos = medalhas[i] if i < 3 else str(i+1)
             linhas.append(
-                f"• {a.get('nome','?')} ({a['chat_id']})\n"
-                f"  Codigo: {a['codigo']} | Vendas: {a['total_vendas']} | Saldo: R$ {a['saldo']:.2f}"
+                f"{pos}. {p.get('nome','?')}"
+                f"  Vendas: {p['total_vendas']} | Ganho: R$ {p['total_ganho']:.2f}"
             )
         enviar(chat_id, "\n".join(linhas))
         return True
