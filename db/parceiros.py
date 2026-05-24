@@ -350,14 +350,19 @@ def listar_saques_pendentes() -> list:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def listar_todos_parceiros() -> list:
-    """Lista todos os parceiros com métricas completas."""
+    """
+    Lista apenas parceiros reais — quem teve pelo menos 1 acesso via link.
+    Usuário comum que nunca compartilhou o link não aparece aqui.
+    """
     conn = get_conn()
     rows = conn.execute("""
         SELECT
             p.chat_id, p.nome, p.codigo, p.saldo, p.total_ganho,
             p.total_vendas, p.criado_em,
-            (SELECT COUNT(*) FROM rastreamento r WHERE r.parceiro_id = p.chat_id) as total_acessos
+            COUNT(r.indicado_id) as total_acessos
         FROM parceiros p
+        INNER JOIN rastreamento r ON r.parceiro_id = p.chat_id
+        GROUP BY p.chat_id
         ORDER BY p.total_vendas DESC, p.total_ganho DESC
     """).fetchall()
     conn.close()
