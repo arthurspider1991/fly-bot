@@ -36,7 +36,8 @@ def url_google(origem: str, destino: str, data_iso: str) -> str:
     return f"https://www.google.com/travel/flights/search?tfs={tfs}&hl=pt-BR"
 
 def link_flights(origem: str, destino: str, data_iso: str) -> str:
-    return url_google(origem, destino, data_iso)
+    # Garante que o texto clicável do Telegram leve para o KAYAK
+    return f"[🔍 Ver passagens disponíveis]({url_kayak(origem, destino, data_iso)})"
 
 
 # ── AUXILIARES ────────────────────────────────────────────────────────────────
