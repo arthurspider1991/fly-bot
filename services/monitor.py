@@ -90,8 +90,14 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
     alt_ida   = None
     alt_volta = None
 
+    airhint_ida   = None
+    airhint_volta = None
+
     if modo in ("completo", "manha"):
-        preco_ida, hist60_ida, alt_ida = buscar_preco_e_historico(origem, destino, data_ida)
+        # Passa data_volta para AirHint poder fazer análise ida+volta
+        preco_ida, hist60_ida, alt_ida, airhint_ida = buscar_preco_e_historico(
+            origem, destino, data_ida, data_volta_iso=data_volta
+        )
     else:
         preco_ida  = buscar_preco_apenas(origem, destino, data_ida)
         hist60_ida = []
@@ -100,7 +106,9 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
     hist60_volta = []
     if data_volta:
         if modo in ("completo", "manha"):
-            preco_volta, hist60_volta, alt_volta = buscar_preco_e_historico(destino, origem, data_volta)
+            preco_volta, hist60_volta, alt_volta, airhint_volta = buscar_preco_e_historico(
+                destino, origem, data_volta
+            )
         else:
             preco_volta = buscar_preco_apenas(destino, origem, data_volta)
 
@@ -205,6 +213,40 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
     # Análise inteligente
     dias_voo = (date.fromisoformat(data_ida) - date.today()).days
 
+    def _bloco_airhint(airhint: dict, orig: str, dest: str) -> list:
+        """Monta bloco com previsão do AirHint para incluir na mensagem."""
+        if not airhint:
+            return []
+
+        acao         = airhint.get("acao", "neutro")
+        sugestao     = airhint.get("sugestao", "")
+        motivo       = airhint.get("motivo", "")
+        probabilidade = airhint.get("probabilidade", "")
+
+        if acao == "esperar":
+            emoji = "⏳"
+        elif acao == "comprar":
+            emoji = "✅"
+        else:
+            emoji = "🤖"
+
+        bloco = ["─────────────────────",
+                 f"🤖 *Previsão IA — {orig} → {dest}*", ""]
+
+        if sugestao:
+            bloco.append(f"{emoji} *{sugestao}*")
+        if probabilidade:
+            bloco.append(f"   Probabilidade: *{probabilidade}*")
+        if motivo:
+            # Trunca motivo longo
+            motivo_curto = motivo[:200] + "..." if len(motivo) > 200 else motivo
+            bloco.append(f"   _{motivo_curto}_")
+
+        bloco.append("")
+        bloco.append("_Previsão gerada pelo AirHint com base em IA_")
+        bloco.append("")
+        return bloco
+
     def _bloco_analise(hist60, preco, data_ref, label):
         """Monta bloco de análise para uma rota (ida ou volta)."""
         bloco = [f"─────────────────────", f"📊 *Análise — {label}*"]
@@ -238,6 +280,10 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
         if data_volta and preco_volta:
             linhas += _bloco_analise(hist60_volta, preco_volta, data_volta,
                                      f"{destino} → {origem}")
+
+        # Previsão IA do AirHint
+        if airhint_ida:
+            linhas += _bloco_airhint(airhint_ida, origem, destino)
 
     elif modo == "normal" and preco_ida:
         if dias_voo <= 20:
