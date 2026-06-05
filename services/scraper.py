@@ -311,31 +311,36 @@ def _buscar_previsao_airhint(
 
     try:
         try:
-            page.goto("https://www.airhint.com/pt", timeout=30000, wait_until="commit")
+            page.goto("https://www.airhint.com/pt", timeout=60000, wait_until="commit")
         except Exception:
             pass
 
-        page.wait_for_selector("#select2-origin-container", state="visible", timeout=30000)
-        page.wait_for_timeout(2000)
+        page.wait_for_selector("#select2-origin-container", state="visible", timeout=60000)
+        page.wait_for_timeout(3000)
 
         # Cookies
         for sel in ["button.css-1jqk1n3", "button:has-text('CONCORDO')",
                     "button:has-text('Aceitar')", "button:has-text('Accept')"]:
             try:
                 el = page.locator(sel).first
-                el.wait_for(state="visible", timeout=1500)
+                el.wait_for(state="visible", timeout=2000)
                 el.click()
-                page.wait_for_timeout(800)
+                page.wait_for_timeout(1000)
                 break
             except Exception:
                 pass
 
-        # Modalidade
+        # Modalidade — espera o input aparecer antes de interagir
+        trip_selector = "input[name='trip_type'][value='oneway']" if apenas_ida else "input[name='trip_type'][value='roundtrip']"
+        try:
+            page.wait_for_selector(trip_selector, state="attached", timeout=15000)
+        except Exception:
+            page.wait_for_timeout(3000)
         if apenas_ida:
             page.check("input[name='trip_type'][value='oneway']")
         else:
             page.check("input[name='trip_type'][value='roundtrip']")
-        page.wait_for_timeout(1500)
+        page.wait_for_timeout(2000)
 
         # Origem
         for _ in range(4):
@@ -391,7 +396,7 @@ def _buscar_previsao_airhint(
         page.click("#find_btn")
 
         # Aguarda resultado da IA
-        page.wait_for_selector("#suggestion", state="visible", timeout=90000)
+        page.wait_for_selector("#suggestion", state="visible", timeout=120000)
         page.wait_for_timeout(3000)
 
         dados = page.evaluate(r"""
