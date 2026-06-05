@@ -499,22 +499,22 @@ def buscar_preco_e_historico(
                 page1.close() # Fecha a aba liberando a memória interna dela
                 log.info("  Aba 1 fechada (Kayak+Google)")
 
-            # Pequena pausa para o Garbage Collector coletar resíduos da aba anterior
-            time.sleep(2)
+            # Fecha o browser completamente antes do AirHint
+            browser.close()
+            log.info("  Browser 1 fechado (Kayak+Google)")
 
-            # ── Sessão 2: AirHint (Reutilizando o MESMO Browser) ──────────────
+            time.sleep(3)
+
+            # ── Sessão 2: AirHint — browser novo e limpo ──────────────────────
             try:
-                page2 = context.new_page() # Abre uma nova aba isolada dentro do mesmo browser
+                browser2, context2 = _novo_browser_context(p)
+                page2 = context2.new_page()
                 airhint = _buscar_previsao_airhint(page2, origem, destino, data_iso, data_volta_iso)
-                page2.close()
-                log.info("  Aba 2 fechada (AirHint)")
+                browser2.close()
+                log.info("  Browser 2 fechado (AirHint)")
             except Exception as e2:
                 log.warning(f"  AirHint sessão falhou: {e2}")
                 airhint = None
-
-            # Agora sim, encerramos o processo global do Chromium
-            browser.close()
-            log.info("  Processo global do Browser finalizado com sucesso.")
 
     except Exception as e:
         log.error(f"  Playwright erro geral no scraper: {e}")
