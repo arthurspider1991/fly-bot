@@ -327,14 +327,14 @@ def _buscar_previsao_airhint(
             try:
                 el = page.locator(sel).first
                 if el.count() > 0:
-                    el.click(force=True, timeout=1500)
+                    el.click(force=True, timeout=2000)
                     log.info(f"  AirHint: cookies aceitos via '{sel}'")
                     page.wait_for_timeout(1000)
                     break
             except Exception:
                 pass
 
-        # Limpeza física via JS
+        # Limpeza física via JS de modais que bloqueiam cliques
         try:
             page.evaluate("""
                 () => {
@@ -348,60 +348,63 @@ def _buscar_previsao_airhint(
         except Exception:
             pass
 
-        # Aguarda container estrutural
-        container_origem = page.locator("#select2-origin-container")
-        container_origem.wait_for(state="attached", timeout=15000)
-        page.wait_for_timeout(1500)
+        # ── 🔄 ALTERAÇÃO ULTRA-RESILIENTE DE MODALIDADE ─────────────────────
+        # Se for Ida e Volta, garantimos o clique no botão visual caso o rádio falhe.
+        # Se for Apenas Ida, deixamos o site alternar sozinho ao ignorar o calendário de volta.
+        if not apenas_ida:
+            try:
+                # Tenta pelo rádio tradicional primeiro
+                page.check("input[name='trip_type'][value='roundtrip']", force=True, timeout=3000)
+            except Exception:
+                try:
+                    # Se falhar (oculto no mobile/headless), clica no texto visual que ativa o modo
+                    page.locator("label:has-text('Ida e volta'), label:has-text('Round trip')").first.click(force=True, timeout=3000)
+                except Exception:
+                    pass
+            page.wait_for_timeout(1000)
 
-        # Modalidade
-        seletor_radio = (
-            "input[name='trip_type'][value='oneway']" if apenas_ida
-            else "input[name='trip_type'][value='roundtrip']"
-        )
-        page.wait_for_selector(seletor_radio, state="attached", timeout=10000)
-        page.check(seletor_radio, force=True, timeout=5000)
-        page.wait_for_timeout(1500)
-
-        # Origem
+        # ── 🛫 Preenchimento de Origem ────────────────────────────────────────
         for _ in range(4):
             try:
-                page.locator("#select2-origin-container").click(force=True, timeout=4000)
-                inp = page.locator(".select2-search--dropdown input.select2-search__field")
+                # Clica no container principal do Select2 usando seletor de ID ou Classe genérica
+                page.locator("#select2-origin-container, .select2-selection--single").first.click(force=True, timeout=4000)
+                inp = page.locator(".select2-search--dropdown input.select2-search__field, input.select2-search__field").first
                 inp.wait_for(state="attached", timeout=2500)
                 inp.fill(origem.lower())
+                page.wait_for_timeout(500)
                 page.locator("li.select2-results__option", has_text=origem.upper()).first.click(force=True, timeout=4000)
                 page.wait_for_timeout(1500)
                 break
             except Exception:
                 page.wait_for_timeout(1000)
 
-        # Destino
+        # ── 🛬 Preenchimento de Destino ───────────────────────────────────────
         for _ in range(4):
             try:
                 page.locator("#select2-destination-container").click(force=True, timeout=4000)
-                inp = page.locator(".select2-search--dropdown input.select2-search__field")
+                inp = page.locator(".select2-search--dropdown input.select2-search__field, input.select2-search__field").first
                 inp.wait_for(state="attached", timeout=2500)
                 inp.fill(destino.lower())
+                page.wait_for_timeout(500)
                 page.locator("li.select2-results__option", has_text=destino.upper()).first.click(force=True, timeout=4000)
                 page.wait_for_timeout(2000)
                 break
             except Exception:
                 page.wait_for_timeout(1000)
 
-        # Calendário ida
+        # ── 📅 Calendários ────────────────────────────────────────────────────
         dia_ida, mes_ano_ida = _data_iso_para_airhint(data_ida_iso)
         if not _navegar_calendario(page, "#departure", mes_ano_ida, dia_ida):
             log.warning("  AirHint: falha data ida")
             return None
 
-        # Calendário volta
         if not apenas_ida:
             dia_volta, mes_ano_volta = _data_iso_para_airhint(data_volta_iso)
             if not _navegar_calendario(page, "#return_date", mes_ano_volta, dia_volta):
                 log.warning("  AirHint: falha data volta")
                 return None
 
-        # Desmarca extras
+        # Desmarca extras e dispara busca
         page.click("body", position={"x": 5, "y": 5}, force=True, timeout=4000)
         page.wait_for_timeout(1000)
         try:
@@ -457,7 +460,6 @@ def _buscar_previsao_airhint(
     except Exception as e:
         log.warning(f"  AirHint indisponível ou estourou timeout de segurança: {e}")
         return None
-
 
 # ── Funções públicas ──────────────────────────────────────────────────────────
 
