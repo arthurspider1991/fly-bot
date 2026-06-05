@@ -487,37 +487,43 @@ def buscar_preco_e_historico(
 
     try:
         with sync_playwright() as p:
-            # Criamos APENAS UM processo do navegador para economizar memória RAM
-            browser, context = _novo_browser_context(p)
-            
-            # ── Sessão 1: Kayak + Google Flights ──────────────────────────────
-            page1 = context.new_page()
+
+            # ── Browser 1: Kayak ──────────────────────────────────────────────
             try:
-                preco, alt = _buscar_preco_kayak(page1, origem, destino, data_iso)
-                hist = _buscar_historico_google(page1, origem, destino, data_iso)
-            finally:
-                page1.close() # Fecha a aba liberando a memória interna dela
-                log.info("  Aba 1 fechada (Kayak+Google)")
+                b1, ctx1 = _novo_browser_context(p)
+                pg1 = ctx1.new_page()
+                preco, alt = _buscar_preco_kayak(pg1, origem, destino, data_iso)
+                b1.close()
+                log.info("  Browser 1 fechado (Kayak)")
+            except Exception as e1:
+                log.warning(f"  Kayak falhou: {e1}")
 
-            # Fecha o browser completamente antes do AirHint
-            browser.close()
-            log.info("  Browser 1 fechado (Kayak+Google)")
+            time.sleep(2)
 
-            time.sleep(3)
-
-            # ── Sessão 2: AirHint — browser novo e limpo ──────────────────────
+            # ── Browser 2: Google Flights ─────────────────────────────────────
             try:
-                browser2, context2 = _novo_browser_context(p)
-                page2 = context2.new_page()
-                airhint = _buscar_previsao_airhint(page2, origem, destino, data_iso, data_volta_iso)
-                browser2.close()
-                log.info("  Browser 2 fechado (AirHint)")
+                b2, ctx2 = _novo_browser_context(p)
+                pg2 = ctx2.new_page()
+                hist = _buscar_historico_google(pg2, origem, destino, data_iso)
+                b2.close()
+                log.info("  Browser 2 fechado (Google Flights)")
             except Exception as e2:
-                log.warning(f"  AirHint sessão falhou: {e2}")
-                airhint = None
+                log.warning(f"  Google Flights falhou: {e2}")
+
+            time.sleep(2)
+
+            # ── Browser 3: AirHint ────────────────────────────────────────────
+            try:
+                b3, ctx3 = _novo_browser_context(p)
+                pg3 = ctx3.new_page()
+                airhint = _buscar_previsao_airhint(pg3, origem, destino, data_iso, data_volta_iso)
+                b3.close()
+                log.info("  Browser 3 fechado (AirHint)")
+            except Exception as e3:
+                log.warning(f"  AirHint falhou: {e3}")
 
     except Exception as e:
-        log.error(f"  Playwright erro geral no scraper: {e}")
+        log.error(f"  Playwright erro geral: {e}")
 
     return preco, hist, alt, airhint
 
