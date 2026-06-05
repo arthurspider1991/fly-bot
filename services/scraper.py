@@ -1,6 +1,6 @@
 """
 services/scraper.py — Preço via Kayak + Histórico via Google Flights + Previsão via AirHint.
-Versão Ultra-Blindada para produção no Railway (Headless).
+Versão com Timeouts Blindados — Previne travamentos infinitos no Railway.
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -80,15 +80,16 @@ def _novo_browser_context(p, headless=True):
 # ── Preço via Kayak ───────────────────────────────────────────────────────────
 
 def _buscar_preco_kayak(page, origem: str, destino: str, data_iso: str):
+    page.set_default_timeout(30000) # Timeout padrão de segurança para o Kayak
     url = url_kayak(origem, destino, data_iso)
     log.info(f"  Kayak: {origem}->{destino} {data_iso}")
-    page.goto(url, timeout=50000)
+    page.goto(url, timeout=40000)
 
     for sel in ["button:has-text('Aceitar')", "button:has-text('Accept')", "#onetrust-accept-btn-handler"]:
         try:
             el = page.query_selector(sel)
             if el and el.is_visible():
-                el.click()
+                el.click(timeout=3000)
                 page.wait_for_timeout(1000)
                 break
         except Exception:
@@ -156,14 +157,15 @@ def _buscar_preco_kayak(page, origem: str, destino: str, data_iso: str):
 # ── Histórico via Google Flights ──────────────────────────────────────────────
 
 def _buscar_historico_google(page, origem: str, destino: str, data_iso: str) -> list:
+    page.set_default_timeout(30000) # Timeout padrão de segurança para o Google
     url = url_google(origem, destino, data_iso)
     log.info(f"  Google histórico: {origem}->{destino} {data_iso}")
     try:
-        page.goto(url, timeout=50000)
+        page.goto(url, timeout=40000)
         try:
-            page.wait_for_selector("ul.Rk10dc", timeout=20000)
+            page.wait_for_selector("ul.Rk10dc", timeout=15000)
         except Exception:
-            page.wait_for_timeout(20000)
+            page.wait_for_timeout(5000)
 
         try:
             page.keyboard.press("Escape")
@@ -171,7 +173,7 @@ def _buscar_historico_google(page, origem: str, destino: str, data_iso: str) -> 
         except Exception:
             pass
 
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(2000)
 
         btn_el = None
         for frame in [page] + list(page.frames):
@@ -203,7 +205,7 @@ def _buscar_historico_google(page, origem: str, destino: str, data_iso: str) -> 
 
         btn_el.scroll_into_view_if_needed()
         page.wait_for_timeout(500)
-        btn_el.click()
+        btn_el.click(timeout=5000)
         log.info("  Histórico: clicado, aguardando SVG...")
         page.wait_for_timeout(10000)
 
@@ -267,11 +269,9 @@ def _navegar_calendario(page, selector_input: str, mes_ano_alvo: str, dia_alvo: 
     mes_alvo_num = meses_map.get(alvo_partes[0], 1)
     ano_alvo_num = int(alvo_partes[1])
 
-    page.click("body", position={"x": 0, "y": 0}, force=True)
+    page.click("body", position={"x": 0, "y": 0}, force=True, timeout=5000)
     page.wait_for_timeout(500)
-    page.click(selector_input, force=True)
-    
-    # Railway: foca em attached para contornar lentidão visual
+    page.click(selector_input, force=True, timeout=5000)
     page.wait_for_selector(".datepicker-dropdown", state="attached", timeout=10000)
 
     for i in range(12):
@@ -283,7 +283,7 @@ def _navegar_calendario(page, selector_input: str, mes_ano_alvo: str, dia_alvo: 
                 ".datepicker-dropdown:visible td.day:not(.old):not(.new)",
                 has_text=str(int(dia_alvo))
             ).first
-            dia_el.click(force=True)
+            dia_el.click(force=True, timeout=5000)
             page.wait_for_timeout(1000)
             return True
 
@@ -292,9 +292,9 @@ def _navegar_calendario(page, selector_input: str, mes_ano_alvo: str, dia_alvo: 
         ano_atual_num = int(atual_partes[1])
 
         if (ano_alvo_num < ano_atual_num) or (ano_alvo_num == ano_atual_num and mes_alvo_num < mes_atual_num):
-            page.locator(".datepicker-dropdown:visible .prev").first.click(force=True)
+            page.locator(".datepicker-dropdown:visible .prev").first.click(force=True, timeout=5000)
         else:
-            page.locator(".datepicker-dropdown:visible .next").first.click(force=True)
+            page.locator(".datepicker-dropdown:visible .next").first.click(force=True, timeout=5000)
         page.wait_for_timeout(800)
 
     return False
@@ -307,15 +307,17 @@ def _buscar_previsao_airhint(
     apenas_ida = data_volta_iso is None
 
     try:
+        # Trava rígida de proteção: se qualquer ação demorar mais de 25s, o script desiste
+        page.set_default_timeout(25000)
+
         try:
-            # wait_until="commit" desvincula o fluxo final do carregamento dos scripts pesados de terceiros
-            page.goto("https://www.airhint.com/pt", timeout=45000, wait_until="commit")
+            page.goto("https://www.airhint.com/pt", timeout=35000, wait_until="commit")
         except Exception as e_nav:
-            log.warning(f"  AirHint navegação interceptada: {e_nav}")
+            log.warning(f"  AirHint navegação interceptada/lenta: {e_nav}")
 
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(2000)
 
-        # Cookies — tenta varrer seletores tradicionais
+        # Cookies — Varredura ultra rápida (limite individual de 1.5s por tentativa)
         seletores_cookies = [
             "button.css-1jqk1n3", "button:has-text('CONCORDO')",
             "button:has-text('Aceitar')", "button:has-text('Accept')",
@@ -325,15 +327,14 @@ def _buscar_previsao_airhint(
             try:
                 el = page.locator(sel).first
                 if el.count() > 0:
-                    el.wait_for(state="attached", timeout=2000)
-                    el.click(force=True)
+                    el.click(force=True, timeout=1500)
                     log.info(f"  AirHint: cookies aceitos via '{sel}'")
                     page.wait_for_timeout(1000)
                     break
             except Exception:
                 pass
 
-        # Força bruta: Deleta fisicamente os overlays de privacidade para liberar o clique no HTML
+        # Limpeza física via JS
         try:
             page.evaluate("""
                 () => {
@@ -347,30 +348,28 @@ def _buscar_previsao_airhint(
         except Exception:
             pass
 
-        # ── BLINDAGEM DO CONTAINER (Correção do erro no Railway) ───────────────────
-        # Mudamos de state="visible" para state="attached" e usamos verificador alternativo.
-        # Evita travar o timeout por causa do carregamento pendente de trackers do site.
+        # Aguarda container estrutural
         container_origem = page.locator("#select2-origin-container")
-        container_origem.wait_for(state="attached", timeout=20000)
-        page.wait_for_timeout(2000)
+        container_origem.wait_for(state="attached", timeout=15000)
+        page.wait_for_timeout(1500)
 
         # Modalidade
         seletor_radio = (
             "input[name='trip_type'][value='oneway']" if apenas_ida
             else "input[name='trip_type'][value='roundtrip']"
         )
-        page.wait_for_selector(seletor_radio, state="attached", timeout=15000)
-        page.check(seletor_radio, force=True)
-        page.wait_for_timeout(2000)
+        page.wait_for_selector(seletor_radio, state="attached", timeout=10000)
+        page.check(seletor_radio, force=True, timeout=5000)
+        page.wait_for_timeout(1500)
 
         # Origem
         for _ in range(4):
             try:
-                page.locator("#select2-origin-container").click(force=True)
+                page.locator("#select2-origin-container").click(force=True, timeout=4000)
                 inp = page.locator(".select2-search--dropdown input.select2-search__field")
-                inp.wait_for(state="attached", timeout=3000)
+                inp.wait_for(state="attached", timeout=2500)
                 inp.fill(origem.lower())
-                page.locator("li.select2-results__option", has_text=origem.upper()).first.click(force=True)
+                page.locator("li.select2-results__option", has_text=origem.upper()).first.click(force=True, timeout=4000)
                 page.wait_for_timeout(1500)
                 break
             except Exception:
@@ -379,11 +378,11 @@ def _buscar_previsao_airhint(
         # Destino
         for _ in range(4):
             try:
-                page.locator("#select2-destination-container").click(force=True)
+                page.locator("#select2-destination-container").click(force=True, timeout=4000)
                 inp = page.locator(".select2-search--dropdown input.select2-search__field")
-                inp.wait_for(state="attached", timeout=3000)
+                inp.wait_for(state="attached", timeout=2500)
                 inp.fill(destino.lower())
-                page.locator("li.select2-results__option", has_text=destino.upper()).first.click(force=True)
+                page.locator("li.select2-results__option", has_text=destino.upper()).first.click(force=True, timeout=4000)
                 page.wait_for_timeout(2000)
                 break
             except Exception:
@@ -403,21 +402,21 @@ def _buscar_previsao_airhint(
                 return None
 
         # Desmarca extras
-        page.click("body", position={"x": 5, "y": 5}, force=True)
+        page.click("body", position={"x": 5, "y": 5}, force=True, timeout=4000)
         page.wait_for_timeout(1000)
         try:
-            if page.locator("#directOnly").is_checked():
-                page.uncheck("#directOnly", force=True)
-            if page.locator("#findAccomodation").is_checked():
-                page.uncheck("#findAccomodation", force=True)
+            if page.locator("#directOnly").is_checked(timeout=2000):
+                page.uncheck("#directOnly", force=True, timeout=2000)
+            if page.locator("#findAccomodation").is_checked(timeout=2000):
+                page.uncheck("#findAccomodation", force=True, timeout=2000)
         except Exception:
             pass
 
         page.wait_for_timeout(1000)
-        page.click("#find_btn", force=True)
+        page.click("#find_btn", force=True, timeout=5000)
 
         # Aguarda predição
-        page.wait_for_selector("#suggestion", state="visible", timeout=120000)
+        page.wait_for_selector("#suggestion", state="visible", timeout=60000)
         page.wait_for_timeout(4000)
 
         dados = page.evaluate(r"""
@@ -456,7 +455,7 @@ def _buscar_previsao_airhint(
         return {"sugestao": sugestao, "motivo": motivo, "probabilidade": porcentagem, "acao": acao}
 
     except Exception as e:
-        log.warning(f"  AirHint indisponível: {e}")
+        log.warning(f"  AirHint indisponível ou estourou timeout de segurança: {e}")
         return None
 
 
@@ -497,7 +496,7 @@ def buscar_preco_e_historico(
                 airhint = None
 
     except Exception as e:
-        log.error(f"  Playwright erro: {e}")
+        log.error(f"  Playwright erro geral no scraper: {e}")
 
     return preco, hist, alt, airhint
 
