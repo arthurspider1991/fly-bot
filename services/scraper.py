@@ -471,11 +471,14 @@ def _buscar_previsao_airhint(
 
 # ── Funções públicas ──────────────────────────────────────────────────────────
 
+# ── Funções públicas (Versão Otimizada para RAM no Railway) ───────────────────
+
 def buscar_preco_e_historico(
     origem: str, destino: str, data_iso: str,
     data_volta_iso: Optional[str] = None
 ) -> Tuple[Optional[float], list, Optional[dict], Optional[dict]]:
     from playwright.sync_api import sync_playwright
+    import time
 
     preco     = None
     hist      = []
@@ -484,30 +487,34 @@ def buscar_preco_e_historico(
 
     try:
         with sync_playwright() as p:
-            # ── Sessão 1: Kayak + Google Flights ──────────────────────────────
+            # Criamos APENAS UM processo do navegador para economizar memória RAM
             browser, context = _novo_browser_context(p)
-            page = context.new_page()
-
-            preco, alt = _buscar_preco_kayak(page, origem, destino, data_iso)
-            hist = _buscar_historico_google(page, origem, destino, data_iso)
-
-            browser.close()
-            log.info("  Browser 1 fechado (Kayak+Google)")
-
-            # ── ⏳ Pequena pausa estratégica para o Railway limpar a memória RAM ──
-            import time
-            time.sleep(3)
-
-            # ── Sessão 2: AirHint (browser novo, memória limpa) ───────────────
+            
+            # ── Sessão 1: Kayak + Google Flights ──────────────────────────────
+            page1 = context.new_page()
             try:
-                browser2, context2 = _novo_browser_context(p)
-                page2 = context2.new_page()
+                preco, alt = _buscar_preco_kayak(page1, origem, destino, data_iso)
+                hist = _buscar_historico_google(page1, origem, destino, data_iso)
+            finally:
+                page1.close() # Fecha a aba liberando a memória interna dela
+                log.info("  Aba 1 fechada (Kayak+Google)")
+
+            # Pequena pausa para o Garbage Collector coletar resíduos da aba anterior
+            time.sleep(2)
+
+            # ── Sessão 2: AirHint (Reutilizando o MESMO Browser) ──────────────
+            try:
+                page2 = context.new_page() # Abre uma nova aba isolada dentro do mesmo browser
                 airhint = _buscar_previsao_airhint(page2, origem, destino, data_iso, data_volta_iso)
-                browser2.close()
-                log.info("  Browser 2 fechado (AirHint)")
+                page2.close()
+                log.info("  Aba 2 fechada (AirHint)")
             except Exception as e2:
                 log.warning(f"  AirHint sessão falhou: {e2}")
                 airhint = None
+
+            # Agora sim, encerramos o processo global do Chromium
+            browser.close()
+            log.info("  Processo global do Browser finalizado com sucesso.")
 
     except Exception as e:
         log.error(f"  Playwright erro geral no scraper: {e}")
