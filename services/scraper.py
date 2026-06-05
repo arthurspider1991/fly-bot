@@ -5,6 +5,7 @@ Versão com Timeouts Blindados — Previne travamentos infinitos no Railway.
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
+import gc
 import base64
 import re
 from datetime import date, timedelta, datetime
@@ -71,6 +72,8 @@ def _novo_browser_context(p, headless=True):
             "--no-first-run",                  # Pula setups iniciais do browser
             "--no-zygote",                     # Evita processos filhos redundantes
             "--single-process",                # Força o Chromium a rodar tudo em uma única thread
+            "--disable-cache",                 # Desativa cache de imagens
+            "--memory-pressure-off",           # Desativa compressão de memória (pode ajudar)
         ],
     )
     context = browser.new_context(
@@ -80,7 +83,7 @@ def _novo_browser_context(p, headless=True):
         ),
         locale="pt-BR",
         timezone_id="America/Sao_Paulo",
-        viewport={"width": 1280, "height": 720}, # Reduzido ligeiramente para exigir menos buffer gráfico
+        viewport={"width": 1024, "height": 600},  # Reduzido de 1280x720 para exigir menos buffer gráfico
     )
     return browser, context
 
@@ -493,34 +496,44 @@ def buscar_preco_e_historico(
                 b1, ctx1 = _novo_browser_context(p)
                 pg1 = ctx1.new_page()
                 preco, alt = _buscar_preco_kayak(pg1, origem, destino, data_iso)
+                pg1.close()
+                ctx1.close()
                 b1.close()
                 log.info("  Browser 1 fechado (Kayak)")
+                gc.collect()  # Força limpeza de memória
+                time.sleep(3)  # Aguarda garbage collection
             except Exception as e1:
                 log.warning(f"  Kayak falhou: {e1}")
-
-            time.sleep(2)
+                gc.collect()
 
             # ── Browser 2: Google Flights ─────────────────────────────────────
             try:
                 b2, ctx2 = _novo_browser_context(p)
                 pg2 = ctx2.new_page()
                 hist = _buscar_historico_google(pg2, origem, destino, data_iso)
+                pg2.close()
+                ctx2.close()
                 b2.close()
                 log.info("  Browser 2 fechado (Google Flights)")
+                gc.collect()  # Força limpeza de memória
+                time.sleep(3)  # Aguarda garbage collection
             except Exception as e2:
                 log.warning(f"  Google Flights falhou: {e2}")
-
-            time.sleep(2)
+                gc.collect()
 
             # ── Browser 3: AirHint ────────────────────────────────────────────
             try:
                 b3, ctx3 = _novo_browser_context(p)
                 pg3 = ctx3.new_page()
                 airhint = _buscar_previsao_airhint(pg3, origem, destino, data_iso, data_volta_iso)
+                pg3.close()
+                ctx3.close()
                 b3.close()
                 log.info("  Browser 3 fechado (AirHint)")
+                gc.collect()  # Força limpeza de memória
             except Exception as e3:
                 log.warning(f"  AirHint falhou: {e3}")
+                gc.collect()
 
     except Exception as e:
         log.error(f"  Playwright erro geral: {e}")
