@@ -60,9 +60,17 @@ def _novo_browser_context(p, headless=True):
     browser = p.chromium.launch(
         headless=headless,
         args=[
-            "--no-sandbox", "--disable-setuid-sandbox",
+            "--no-sandbox", 
+            "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
             "--disable-blink-features=AutomationControlled",
+            # ── 🧠 ARGUMENTOS PARA ECONOMIA DE MEMÓRIA RAM (Anti-Crash Railway) ──
+            "--disable-gpu",                  # Desativa aceleração de hardware (reduz muita RAM)
+            "--disable-software-rasterizer",   # Evita renderizações 3D pesadas em CPU
+            "--disable-extensions",            # Desativa extensões internas
+            "--no-first-run",                  # Pula setups iniciais do browser
+            "--no-zygote",                     # Evita processos filhos redundantes
+            "--single-process",                # Força o Chromium a rodar tudo em uma única thread
         ],
     )
     context = browser.new_context(
@@ -72,7 +80,7 @@ def _novo_browser_context(p, headless=True):
         ),
         locale="pt-BR",
         timezone_id="America/Sao_Paulo",
-        viewport={"width": 1440, "height": 900},
+        viewport={"width": 1280, "height": 720}, # Reduzido ligeiramente para exigir menos buffer gráfico
     )
     return browser, context
 
@@ -485,6 +493,10 @@ def buscar_preco_e_historico(
 
             browser.close()
             log.info("  Browser 1 fechado (Kayak+Google)")
+
+            # ── ⏳ Pequena pausa estratégica para o Railway limpar a memória RAM ──
+            import time
+            time.sleep(3)
 
             # ── Sessão 2: AirHint (browser novo, memória limpa) ───────────────
             try:
