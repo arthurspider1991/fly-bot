@@ -302,9 +302,7 @@ def _buscar_previsao_airhint(
     data_ida_iso: str, data_volta_iso: Optional[str] = None
 ) -> Optional[dict]:
     """
-    Consulta o AirHint e retorna:
-    {sugestao, motivo, probabilidade, acao}
-    acao = 'comprar' | 'esperar' | 'neutro'
+    Consulta o AirHint de forma ultra-resiliente para Railway (headless).
     """
     log.info(f"  AirHint: {origem}->{destino} ida={data_ida_iso} volta={data_volta_iso}")
     apenas_ida = data_volta_iso is None
@@ -312,40 +310,60 @@ def _buscar_previsao_airhint(
     try:
         try:
             page.goto("https://www.airhint.com/pt", timeout=60000, wait_until="commit")
-        except Exception:
-            pass
+        except Exception as e_nav:
+            log.warning(f"  AirHint navegação: {e_nav}")
 
-        page.wait_for_selector("#select2-origin-container", state="visible", timeout=60000)
         page.wait_for_timeout(3000)
 
-        # Cookies
-        for sel in ["button.css-1jqk1n3", "button:has-text('CONCORDO')",
-                    "button:has-text('Aceitar')", "button:has-text('Accept')"]:
+        # Cookies — tenta seletores e depois força bruta via JS
+        seletores_cookies = [
+            "button.css-1jqk1n3", "button:has-text('CONCORDO')",
+            "button:has-text('Aceitar')", "button:has-text('Accept')",
+            ".fc-cta-consent", "button.fc-button"
+        ]
+        for sel in seletores_cookies:
             try:
                 el = page.locator(sel).first
-                el.wait_for(state="visible", timeout=2000)
-                el.click()
-                page.wait_for_timeout(1000)
-                break
+                if el.count() > 0:
+                    el.wait_for(state="visible", timeout=2000)
+                    el.click(force=True)
+                    log.info(f"  AirHint: cookies via '{sel}'")
+                    page.wait_for_timeout(1000)
+                    break
             except Exception:
                 pass
 
-        # Modalidade — espera o input aparecer antes de interagir
-        trip_selector = "input[name='trip_type'][value='oneway']" if apenas_ida else "input[name='trip_type'][value='roundtrip']"
+        # Força bruta: remove overlays de privacidade via JS
         try:
-            page.wait_for_selector(trip_selector, state="attached", timeout=15000)
+            page.evaluate("""
+                () => {
+                    const overlays = document.querySelectorAll(
+                        '.fc-consent-root, .cc-window, #onetrust-banner-sdk, .cookie-consent'
+                    );
+                    overlays.forEach(el => el.remove());
+                    document.body.style.overflow = 'auto';
+                }
+            """)
         except Exception:
-            page.wait_for_timeout(3000)
-        if apenas_ida:
-            page.check("input[name='trip_type'][value='oneway']")
-        else:
-            page.check("input[name='trip_type'][value='roundtrip']")
+            pass
+
+        # Aguarda formulário
+        page.wait_for_selector("#select2-origin-container", state="visible", timeout=30000)
+        page.wait_for_timeout(2000)
+
+        # Modalidade
+        seletor_radio = (
+            "input[name='trip_type'][value='oneway']" if apenas_ida
+            else "input[name='trip_type'][value='roundtrip']"
+        )
+        page.wait_for_selector(seletor_radio, state="attached", timeout=15000)
+        page.check(seletor_radio, force=True)
         page.wait_for_timeout(2000)
 
         # Origem
         for _ in range(4):
             try:
-                page.click("#select2-origin-container")
+                page.click("#select2-origin-container", force=True)
                 inp = page.locator(".select2-search--dropdown input.select2-search__field")
                 inp.wait_for(state="visible", timeout=3000)
                 inp.fill(origem.lower())
@@ -358,7 +376,7 @@ def _buscar_previsao_airhint(
         # Destino
         for _ in range(4):
             try:
-                page.click("#select2-destination-container")
+                page.click("#select2-destination-container", force=True)
                 inp = page.locator(".select2-search--dropdown input.select2-search__field")
                 inp.wait_for(state="visible", timeout=3000)
                 inp.fill(destino.lower())
@@ -368,68 +386,61 @@ def _buscar_previsao_airhint(
             except Exception:
                 page.wait_for_timeout(1000)
 
-        # Data ida
+        # Calendário ida
         dia_ida, mes_ano_ida = _data_iso_para_airhint(data_ida_iso)
         if not _navegar_calendario(page, "#departure", mes_ano_ida, dia_ida):
-            log.warning("  AirHint: falha ao selecionar data de ida")
+            log.warning("  AirHint: falha data ida")
             return None
 
-        # Data volta
+        # Calendário volta
         if not apenas_ida:
             dia_volta, mes_ano_volta = _data_iso_para_airhint(data_volta_iso)
             if not _navegar_calendario(page, "#return_date", mes_ano_volta, dia_volta):
-                log.warning("  AirHint: falha ao selecionar data de volta")
+                log.warning("  AirHint: falha data volta")
                 return None
 
-        # Desmarca extras e busca
-        page.click("body", position={"x": 5, "y": 5})
+        # Desmarca extras
+        page.click("body", position={"x": 5, "y": 5}, force=True)
         page.wait_for_timeout(1000)
         try:
             if page.locator("#directOnly").is_checked():
-                page.uncheck("#directOnly")
+                page.uncheck("#directOnly", force=True)
             if page.locator("#findAccomodation").is_checked():
-                page.uncheck("#findAccomodation")
+                page.uncheck("#findAccomodation", force=True)
         except Exception:
             pass
 
         page.wait_for_timeout(1000)
-        page.click("#find_btn")
+        page.click("#find_btn", force=True)
 
-        # Aguarda resultado da IA
+        # Aguarda predição
         page.wait_for_selector("#suggestion", state="visible", timeout=120000)
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(4000)
 
         dados = page.evaluate(r"""
             () => {
                 const elSug = document.querySelector('#suggestion');
                 const sugestao = elSug ? elSug.innerText.trim() : "";
-
                 const elTooltip = document.querySelector('#prediction_tooltip');
                 let motivo = "";
                 if (elTooltip) {
                     motivo = elTooltip.getAttribute('data-original-title') ||
                              elTooltip.title || "";
                 }
-
                 let porcentagem = "";
                 const svgTexts = Array.from(document.querySelectorAll('svg text tspan, svg text'));
                 for (let el of svgTexts) {
                     const txt = (el.textContent || '').trim();
-                    if (/^\d+%$/.test(txt)) {
-                        porcentagem = txt;
-                        break;
-                    }
+                    if (/^\d+%$/.test(txt)) { porcentagem = txt; break; }
                 }
-
                 return {sugestao, motivo, porcentagem};
             }
         """)
 
-        sugestao     = dados.get("sugestao", "")
-        motivo       = dados.get("motivo", "")
-        porcentagem  = dados.get("porcentagem", "")
+        sugestao    = dados.get("sugestao", "")
+        motivo      = dados.get("motivo", "")
+        porcentagem = dados.get("porcentagem", "")
 
-        # Determina ação
         sug_lower = sugestao.lower()
         if "espere" in sug_lower or "aguarde" in sug_lower or "wait" in sug_lower:
             acao = "esperar"
@@ -438,18 +449,13 @@ def _buscar_previsao_airhint(
         else:
             acao = "neutro"
 
-        log.info(f"  AirHint: {sugestao} | {porcentagem} | acao={acao}")
-
-        return {
-            "sugestao":    sugestao,
-            "motivo":      motivo,
-            "probabilidade": porcentagem,
-            "acao":        acao,
-        }
+        log.info(f"  AirHint sucesso: {sugestao} | {porcentagem} | acao={acao}")
+        return {"sugestao": sugestao, "motivo": motivo, "probabilidade": porcentagem, "acao": acao}
 
     except Exception as e:
         log.warning(f"  AirHint indisponível: {e}")
         return None
+
 
 
 # ── Funções públicas ──────────────────────────────────────────────────────────
@@ -474,19 +480,27 @@ def buscar_preco_e_historico(
 
     try:
         with sync_playwright() as p:
+            # ── Sessão 1: Kayak + Google Flights ──────────────────────────────
             browser, context = _novo_browser_context(p)
             page = context.new_page()
 
-            # 1. Kayak — preço atual
             preco, alt = _buscar_preco_kayak(page, origem, destino, data_iso)
-
-            # 2. Google Flights — histórico 60 dias
             hist = _buscar_historico_google(page, origem, destino, data_iso)
 
-            # 3. AirHint — previsão IA
-            airhint = _buscar_previsao_airhint(page, origem, destino, data_iso, data_volta_iso)
-
             browser.close()
+            log.info("  Browser 1 fechado (Kayak+Google)")
+
+            # ── Sessão 2: AirHint (browser novo, memória limpa) ───────────────
+            try:
+                browser2, context2 = _novo_browser_context(p)
+                page2 = context2.new_page()
+                airhint = _buscar_previsao_airhint(page2, origem, destino, data_iso, data_volta_iso)
+                browser2.close()
+                log.info("  Browser 2 fechado (AirHint)")
+            except Exception as e2:
+                log.warning(f"  AirHint sessão falhou: {e2}")
+                airhint = None
+
     except Exception as e:
         log.error(f"  Playwright erro: {e}")
 
