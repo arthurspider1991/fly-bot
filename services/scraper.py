@@ -1,5 +1,6 @@
 """
 services/scraper.py — Preço via Kayak + Histórico via Google Flights + Previsão via AirHint.
+Versão Ultra-Blindada para produção no Railway (Headless).
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -254,7 +255,6 @@ MESES_PT = {
 }
 
 def _data_iso_para_airhint(data_iso: str) -> tuple:
-    """Converte '2026-10-25' em (dia='25', mes_ano='outubro 2026')"""
     dt = datetime.strptime(data_iso, "%Y-%m-%d")
     return str(dt.day), f"{MESES_PT[dt.month]} {dt.year}"
 
@@ -267,10 +267,12 @@ def _navegar_calendario(page, selector_input: str, mes_ano_alvo: str, dia_alvo: 
     mes_alvo_num = meses_map.get(alvo_partes[0], 1)
     ano_alvo_num = int(alvo_partes[1])
 
-    page.click("body", position={"x": 0, "y": 0})
+    page.click("body", position={"x": 0, "y": 0}, force=True)
     page.wait_for_timeout(500)
-    page.click(selector_input)
-    page.wait_for_selector(".datepicker-dropdown", state="visible", timeout=5000)
+    page.click(selector_input, force=True)
+    
+    # Railway: foca em attached para contornar lentidão visual
+    page.wait_for_selector(".datepicker-dropdown", state="attached", timeout=10000)
 
     for i in range(12):
         switch_mes = page.locator(".datepicker-dropdown:visible .datepicker-switch").first
@@ -281,7 +283,7 @@ def _navegar_calendario(page, selector_input: str, mes_ano_alvo: str, dia_alvo: 
                 ".datepicker-dropdown:visible td.day:not(.old):not(.new)",
                 has_text=str(int(dia_alvo))
             ).first
-            dia_el.click()
+            dia_el.click(force=True)
             page.wait_for_timeout(1000)
             return True
 
@@ -290,9 +292,9 @@ def _navegar_calendario(page, selector_input: str, mes_ano_alvo: str, dia_alvo: 
         ano_atual_num = int(atual_partes[1])
 
         if (ano_alvo_num < ano_atual_num) or (ano_alvo_num == ano_atual_num and mes_alvo_num < mes_atual_num):
-            page.locator(".datepicker-dropdown:visible .prev").first.click()
+            page.locator(".datepicker-dropdown:visible .prev").first.click(force=True)
         else:
-            page.locator(".datepicker-dropdown:visible .next").first.click()
+            page.locator(".datepicker-dropdown:visible .next").first.click(force=True)
         page.wait_for_timeout(800)
 
     return False
@@ -301,21 +303,19 @@ def _buscar_previsao_airhint(
     page, origem: str, destino: str,
     data_ida_iso: str, data_volta_iso: Optional[str] = None
 ) -> Optional[dict]:
-    """
-    Consulta o AirHint de forma ultra-resiliente para Railway (headless).
-    """
     log.info(f"  AirHint: {origem}->{destino} ida={data_ida_iso} volta={data_volta_iso}")
     apenas_ida = data_volta_iso is None
 
     try:
         try:
-            page.goto("https://www.airhint.com/pt", timeout=60000, wait_until="commit")
+            # wait_until="commit" desvincula o fluxo final do carregamento dos scripts pesados de terceiros
+            page.goto("https://www.airhint.com/pt", timeout=45000, wait_until="commit")
         except Exception as e_nav:
-            log.warning(f"  AirHint navegação: {e_nav}")
+            log.warning(f"  AirHint navegação interceptada: {e_nav}")
 
         page.wait_for_timeout(3000)
 
-        # Cookies — tenta seletores e depois força bruta via JS
+        # Cookies — tenta varrer seletores tradicionais
         seletores_cookies = [
             "button.css-1jqk1n3", "button:has-text('CONCORDO')",
             "button:has-text('Aceitar')", "button:has-text('Accept')",
@@ -325,15 +325,15 @@ def _buscar_previsao_airhint(
             try:
                 el = page.locator(sel).first
                 if el.count() > 0:
-                    el.wait_for(state="visible", timeout=2000)
+                    el.wait_for(state="attached", timeout=2000)
                     el.click(force=True)
-                    log.info(f"  AirHint: cookies via '{sel}'")
+                    log.info(f"  AirHint: cookies aceitos via '{sel}'")
                     page.wait_for_timeout(1000)
                     break
             except Exception:
                 pass
 
-        # Força bruta: remove overlays de privacidade via JS
+        # Força bruta: Deleta fisicamente os overlays de privacidade para liberar o clique no HTML
         try:
             page.evaluate("""
                 () => {
@@ -347,8 +347,11 @@ def _buscar_previsao_airhint(
         except Exception:
             pass
 
-        # Aguarda formulário
-        page.wait_for_selector("#select2-origin-container", state="visible", timeout=30000)
+        # ── BLINDAGEM DO CONTAINER (Correção do erro no Railway) ───────────────────
+        # Mudamos de state="visible" para state="attached" e usamos verificador alternativo.
+        # Evita travar o timeout por causa do carregamento pendente de trackers do site.
+        container_origem = page.locator("#select2-origin-container")
+        container_origem.wait_for(state="attached", timeout=20000)
         page.wait_for_timeout(2000)
 
         # Modalidade
@@ -363,11 +366,11 @@ def _buscar_previsao_airhint(
         # Origem
         for _ in range(4):
             try:
-                page.click("#select2-origin-container", force=True)
+                page.locator("#select2-origin-container").click(force=True)
                 inp = page.locator(".select2-search--dropdown input.select2-search__field")
-                inp.wait_for(state="visible", timeout=3000)
+                inp.wait_for(state="attached", timeout=3000)
                 inp.fill(origem.lower())
-                page.locator("li.select2-results__option", has_text=origem.upper()).first.click()
+                page.locator("li.select2-results__option", has_text=origem.upper()).first.click(force=True)
                 page.wait_for_timeout(1500)
                 break
             except Exception:
@@ -376,11 +379,11 @@ def _buscar_previsao_airhint(
         # Destino
         for _ in range(4):
             try:
-                page.click("#select2-destination-container", force=True)
+                page.locator("#select2-destination-container").click(force=True)
                 inp = page.locator(".select2-search--dropdown input.select2-search__field")
-                inp.wait_for(state="visible", timeout=3000)
+                inp.wait_for(state="attached", timeout=3000)
                 inp.fill(destino.lower())
-                page.locator("li.select2-results__option", has_text=destino.upper()).first.click()
+                page.locator("li.select2-results__option", has_text=destino.upper()).first.click(force=True)
                 page.wait_for_timeout(2000)
                 break
             except Exception:
@@ -457,20 +460,12 @@ def _buscar_previsao_airhint(
         return None
 
 
-
 # ── Funções públicas ──────────────────────────────────────────────────────────
 
 def buscar_preco_e_historico(
     origem: str, destino: str, data_iso: str,
     data_volta_iso: Optional[str] = None
 ) -> Tuple[Optional[float], list, Optional[dict], Optional[dict]]:
-    """
-    Busca completa (usada 1x/dia no ciclo matinal):
-      - Preço atual via Kayak
-      - Histórico 60 dias via Google Flights
-      - Previsão IA via AirHint
-    Retorna: (preco, historico, alternativo, airhint)
-    """
     from playwright.sync_api import sync_playwright
 
     preco     = None
@@ -508,7 +503,6 @@ def buscar_preco_e_historico(
 
 
 def buscar_preco_apenas(origem: str, destino: str, data_iso: str) -> Optional[float]:
-    """Versão rápida com cache — ciclo de 2h, só Kayak."""
     from db.cache import chave_rota, get_cache, set_cache
 
     chave  = chave_rota(origem, destino, data_iso)
@@ -533,7 +527,6 @@ def buscar_preco_apenas(origem: str, destino: str, data_iso: str) -> Optional[fl
 
 
 def buscar_historico_apenas(origem: str, destino: str, data_iso: str) -> list:
-    """Busca só o histórico de 60 dias via Google Flights, sem preço."""
     from playwright.sync_api import sync_playwright
     hist = []
     try:
