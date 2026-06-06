@@ -323,7 +323,7 @@ def _buscar_previsao_airhint(
         except Exception as e_nav:
             log.warning(f"  AirHint navegação interceptada/lenta: {e_nav}")
 
-        page.wait_for_timeout(2000)
+        time.sleep(2.0)
 
         # Cookies — Varredura ultra rápida (limite individual de 1.5s por tentativa)
         seletores_cookies = [
@@ -337,7 +337,7 @@ def _buscar_previsao_airhint(
                 if el.count() > 0:
                     el.click(force=True, timeout=2000)
                     log.info(f"  AirHint: cookies aceitos via '{sel}'")
-                    page.wait_for_timeout(1000)
+                    time.sleep(1.0)
                     break
             except Exception:
                 pass
@@ -369,7 +369,7 @@ def _buscar_previsao_airhint(
                     page.locator("label:has-text('Ida e volta'), label:has-text('Round trip')").first.click(force=True, timeout=3000)
                 except Exception:
                     pass
-            page.wait_for_timeout(1000)
+            time.sleep(1.0)
 
         # ── 🛫 Preenchimento de Origem ────────────────────────────────────────
         for _ in range(4):
@@ -379,12 +379,12 @@ def _buscar_previsao_airhint(
                 inp = page.locator(".select2-search--dropdown input.select2-search__field, input.select2-search__field").first
                 inp.wait_for(state="attached", timeout=2500)
                 inp.fill(origem.lower())
-                page.wait_for_timeout(500)
+                time.sleep(0.5)
                 page.locator("li.select2-results__option", has_text=origem.upper()).first.click(force=True, timeout=4000)
-                page.wait_for_timeout(1500)
+                time.sleep(1.5)
                 break
             except Exception:
-                page.wait_for_timeout(1000)
+                time.sleep(1.0)
 
         # ── 🛬 Preenchimento de Destino ───────────────────────────────────────
         for _ in range(4):
@@ -393,12 +393,12 @@ def _buscar_previsao_airhint(
                 inp = page.locator(".select2-search--dropdown input.select2-search__field, input.select2-search__field").first
                 inp.wait_for(state="attached", timeout=2500)
                 inp.fill(destino.lower())
-                page.wait_for_timeout(500)
+                time.sleep(0.5)
                 page.locator("li.select2-results__option", has_text=destino.upper()).first.click(force=True, timeout=4000)
-                page.wait_for_timeout(2000)
+                time.sleep(2.0)
                 break
             except Exception:
-                page.wait_for_timeout(1000)
+                time.sleep(1.0)
 
         # ── 📅 Calendários ────────────────────────────────────────────────────
         dia_ida, mes_ano_ida = _data_iso_para_airhint(data_ida_iso)
@@ -414,7 +414,7 @@ def _buscar_previsao_airhint(
 
         # Desmarca extras e dispara busca
         page.click("body", position={"x": 5, "y": 5}, force=True, timeout=4000)
-        page.wait_for_timeout(1000)
+        time.sleep(1.0)
         try:
             if page.locator("#directOnly").is_checked(timeout=2000):
                 page.uncheck("#directOnly", force=True, timeout=2000)
@@ -423,12 +423,12 @@ def _buscar_previsao_airhint(
         except Exception:
             pass
 
-        page.wait_for_timeout(1000)
+        time.sleep(1.0)
         page.click("#find_btn", force=True, timeout=5000)
 
         # Aguarda predição
         page.wait_for_selector("#suggestion", state="visible", timeout=60000)
-        page.wait_for_timeout(4000)
+        time.sleep(4.0)
 
         dados = page.evaluate(r"""
             () => {
@@ -487,43 +487,37 @@ def buscar_preco_e_historico(
 
     try:
         with sync_playwright() as p:
-
-            # ── Browser 1: Kayak ──────────────────────────────────────────────
+            # Criamos APENAS UM processo do navegador para economizar memória RAM
+            browser, context = _novo_browser_context(p)
+            
+            # ── Sessão 1: Kayak + Google Flights ──────────────────────────────
+            page1 = context.new_page()
             try:
-                b1, ctx1 = _novo_browser_context(p)
-                pg1 = ctx1.new_page()
-                preco, alt = _buscar_preco_kayak(pg1, origem, destino, data_iso)
-                b1.close()
-                log.info("  Browser 1 fechado (Kayak)")
-            except Exception as e1:
-                log.warning(f"  Kayak falhou: {e1}")
+                preco, alt = _buscar_preco_kayak(page1, origem, destino, data_iso)
+                hist = _buscar_historico_google(page1, origem, destino, data_iso)
+            finally:
+                page1.close() # Fecha a aba liberando a memória interna dela
+                log.info("  Aba 1 fechada (Kayak+Google)")
 
+            # Pequena pausa para o Garbage Collector coletar resíduos da aba anterior
             time.sleep(2)
 
-            # ── Browser 2: Google Flights ─────────────────────────────────────
+            # ── Sessão 2: AirHint (Reutilizando o MESMO Browser) ──────────────
             try:
-                b2, ctx2 = _novo_browser_context(p)
-                pg2 = ctx2.new_page()
-                hist = _buscar_historico_google(pg2, origem, destino, data_iso)
-                b2.close()
-                log.info("  Browser 2 fechado (Google Flights)")
+                page2 = context.new_page() # Abre uma nova aba isolada dentro do mesmo browser
+                airhint = _buscar_previsao_airhint(page2, origem, destino, data_iso, data_volta_iso)
+                page2.close()
+                log.info("  Aba 2 fechada (AirHint)")
             except Exception as e2:
-                log.warning(f"  Google Flights falhou: {e2}")
+                log.warning(f"  AirHint sessão falhou: {e2}")
+                airhint = None
 
-            time.sleep(2)
-
-            # ── Browser 3: AirHint ────────────────────────────────────────────
-            try:
-                b3, ctx3 = _novo_browser_context(p)
-                pg3 = ctx3.new_page()
-                airhint = _buscar_previsao_airhint(pg3, origem, destino, data_iso, data_volta_iso)
-                b3.close()
-                log.info("  Browser 3 fechado (AirHint)")
-            except Exception as e3:
-                log.warning(f"  AirHint falhou: {e3}")
+            # Agora sim, encerramos o processo global do Chromium
+            browser.close()
+            log.info("  Processo global do Browser finalizado com sucesso.")
 
     except Exception as e:
-        log.error(f"  Playwright erro geral: {e}")
+        log.error(f"  Playwright erro geral no scraper: {e}")
 
     return preco, hist, alt, airhint
 
