@@ -139,13 +139,25 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
 
     # ── Alertas especiais ─────────────────────────────────────────────────────
     if hist60_ida and preco_ida:
-        checar_alertas_especiais(chat_id, dados, preco_ida, hist60_ida, _enviar)
+        alertas = checar_alertas_especiais(hist60_ida, preco_ida, dados)
+        for alerta in alertas:
+            _enviar(chat_id, alerta)
+            time.sleep(0.3)
 
     # ── Análise rápida de preço ───────────────────────────────────────────────
-    def _tag_rapida(preco, hist_salvo_chave):
+    def _tag_rapida(preco, hist_salvo_chave, hist60_ref=None):
         """Retorna tag curta de análise para o ciclo normal."""
         ant = hist_dados.get(hist_salvo_chave)
-        precos_hist = [h["preco"] for h in hist60_ida] if hist60_ida else []
+        hist60_ref = hist60_ref or []
+        precos_30d = []
+
+        for h in hist60_ref:
+            try:
+                if int(h.get("dias_atras", 999)) <= 30:
+                    precos_30d.append(float(h["preco"]))
+            except Exception:
+                continue
+
         tags = []
         # Tendência vs anterior
         if ant:
@@ -153,9 +165,9 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
             if pct >= 2:   tags.append("📈 subindo")
             elif pct <= -2: tags.append("📉 caindo")
             else:           tags.append("➡️ estável")
-        # Vs média 30 dias
-        if precos_hist:
-            media30 = sum(precos_hist[:30]) / min(30, len(precos_hist))
+        # Vs média real dos últimos 30 dias
+        if precos_30d:
+            media30 = sum(precos_30d) / len(precos_30d)
             pct_m   = (preco - media30) / media30 * 100
             if pct_m <= -10:  tags.append("✅ preço bom")
             elif pct_m <= 5:  tags.append("🟡 na média")
@@ -167,7 +179,7 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
 
     # Ida
     if preco_ida is not None:
-        tag_ida = f" — {_tag_rapida(preco_ida, 'preco_ida')}" if modo == "normal" else ""
+        tag_ida = f" — {_tag_rapida(preco_ida, 'preco_ida', hist60_ida)}" if modo == "normal" else ""
         linhas.append(f"💰 Ida:   *R$ {preco_ida:.0f}*{tag_ida}")
     else:
         ant = hist_dados.get("preco_ida")
@@ -176,7 +188,7 @@ def executar_ciclo_usuario(chat_id, modo: str = "normal") -> None:
     # Volta
     if data_volta:
         if preco_volta is not None:
-            tag_volta = f" — {_tag_rapida(preco_volta, 'preco_volta')}" if modo == "normal" else ""
+            tag_volta = f" — {_tag_rapida(preco_volta, 'preco_volta', hist60_volta)}" if modo == "normal" else ""
             linhas.append(f"↩️ Volta: *R$ {preco_volta:.0f}*{tag_volta}")
             if preco_ida:
                 linhas.append(f"💳 Total: *R$ {(preco_ida + preco_volta):.0f}*")
