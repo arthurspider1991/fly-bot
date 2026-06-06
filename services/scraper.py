@@ -314,6 +314,7 @@ def _buscar_previsao_airhint(
     page, origem: str, destino: str,
     data_ida_iso: str, data_volta_iso: Optional[str] = None
 ) -> Optional[dict]:
+    import time
     log.info(f"  AirHint: {origem}->{destino} ida={data_ida_iso} volta={data_volta_iso}")
     apenas_ida = data_volta_iso is None
 
@@ -326,7 +327,7 @@ def _buscar_previsao_airhint(
         except Exception as e_nav:
             log.warning(f"  AirHint navegação interceptada/lenta: {e_nav}")
 
-        page.wait_for_timeout(2000)
+        time.sleep(2.0)
 
         # Cookies — Varredura ultra rápida (limite individual de 1.5s por tentativa)
         seletores_cookies = [
@@ -340,7 +341,7 @@ def _buscar_previsao_airhint(
                 if el.count() > 0:
                     el.click(force=True, timeout=2000)
                     log.info(f"  AirHint: cookies aceitos via '{sel}'")
-                    page.wait_for_timeout(1000)
+                    time.sleep(1.0)
                     break
             except Exception:
                 pass
@@ -372,7 +373,7 @@ def _buscar_previsao_airhint(
                     page.locator("label:has-text('Ida e volta'), label:has-text('Round trip')").first.click(force=True, timeout=3000)
                 except Exception:
                     pass
-            page.wait_for_timeout(1000)
+            time.sleep(1.0)
 
         # ── 🛫 Preenchimento de Origem ────────────────────────────────────────
         for _ in range(4):
@@ -382,12 +383,12 @@ def _buscar_previsao_airhint(
                 inp = page.locator(".select2-search--dropdown input.select2-search__field, input.select2-search__field").first
                 inp.wait_for(state="attached", timeout=2500)
                 inp.fill(origem.lower())
-                page.wait_for_timeout(500)
+                time.sleep(0.5)
                 page.locator("li.select2-results__option", has_text=origem.upper()).first.click(force=True, timeout=4000)
-                page.wait_for_timeout(1500)
+                time.sleep(1.5)
                 break
             except Exception:
-                page.wait_for_timeout(1000)
+                time.sleep(1.0)
 
         # ── 🛬 Preenchimento de Destino ───────────────────────────────────────
         for _ in range(4):
@@ -396,12 +397,12 @@ def _buscar_previsao_airhint(
                 inp = page.locator(".select2-search--dropdown input.select2-search__field, input.select2-search__field").first
                 inp.wait_for(state="attached", timeout=2500)
                 inp.fill(destino.lower())
-                page.wait_for_timeout(500)
+                time.sleep(0.5)
                 page.locator("li.select2-results__option", has_text=destino.upper()).first.click(force=True, timeout=4000)
-                page.wait_for_timeout(2000)
+                time.sleep(2.0)
                 break
             except Exception:
-                page.wait_for_timeout(1000)
+                time.sleep(1.0)
 
         # ── 📅 Calendários ────────────────────────────────────────────────────
         dia_ida, mes_ano_ida = _data_iso_para_airhint(data_ida_iso)
@@ -417,7 +418,7 @@ def _buscar_previsao_airhint(
 
         # Desmarca extras e dispara busca
         page.click("body", position={"x": 5, "y": 5}, force=True, timeout=4000)
-        page.wait_for_timeout(1000)
+        time.sleep(1.0)
         try:
             if page.locator("#directOnly").is_checked(timeout=2000):
                 page.uncheck("#directOnly", force=True, timeout=2000)
@@ -426,12 +427,12 @@ def _buscar_previsao_airhint(
         except Exception:
             pass
 
-        page.wait_for_timeout(1000)
+        time.sleep(1.0)
         page.click("#find_btn", force=True, timeout=5000)
 
         # Aguarda predição
         page.wait_for_selector("#suggestion", state="visible", timeout=60000)
-        page.wait_for_timeout(4000)
+        time.sleep(4.0)
 
         dados = page.evaluate(r"""
             () => {
