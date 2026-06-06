@@ -1,18 +1,65 @@
 """
 services/analise.py — Análise inteligente de histórico de preços e alertas especiais.
+Versão "IA de Decisão" — Gatilhos claros, urgência comercial e análise mais segura.
 """
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-
-
-import time
+import sys
+import os
 from datetime import date
+from statistics import median
 from typing import Optional
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from config import get_logger
 
 log = get_logger(__name__)
+
+
+def _formatar_moeda(valor: float) -> str:
+    return f"R$ {valor:.0f}"
+
+
+def _percentil(valores: list[float], p: float) -> float:
+    """
+    Percentil simples sem depender de bibliotecas externas.
+    p deve estar entre 0 e 100.
+    """
+    if not valores:
+        return 0
+
+    valores_ordenados = sorted(valores)
+    k = (len(valores_ordenados) - 1) * (p / 100)
+    f = int(k)
+    c = min(f + 1, len(valores_ordenados) - 1)
+
+    if f == c:
+        return valores_ordenados[f]
+
+    return valores_ordenados[f] + (valores_ordenados[c] - valores_ordenados[f]) * (k - f)
+
+
+def _dias_ate_voo(data_voo_iso: str) -> Optional[int]:
+    try:
+        data_voo = date.fromisoformat(data_voo_iso)
+        return (data_voo - date.today()).days
+    except Exception:
+        log.warning("Data de voo inválida recebida: %s", data_voo_iso)
+        return None
+
+
+def _extrair_precos_validos(historico_60d: list) -> list[float]:
+    precos = []
+
+    for item in historico_60d:
+        try:
+            preco = float(item.get("preco"))
+            if preco > 0:
+                precos.append(preco)
+        except Exception:
+            continue
+
+    return precos
 
 
 def analisar_historico(
@@ -21,218 +68,279 @@ def analisar_historico(
     data_voo_iso: str,
 ) -> Optional[str]:
     """
-    Recebe lista de dicts {dias_atras, preco} e retorna string de análise
-    pronta para enviar ao usuário, ou None se dados insuficientes.
+    Recebe a lista de dicts {dias_atras, preco} e o preço atual.
+    Retorna uma análise humanizada e comercial, focada na tomada de decisão do cliente.
     """
+
     if not historico_60d or preco_atual is None:
         return None
 
-    precos = [h["preco"] for h in historico_60d]
+    try:
+        preco_atual = float(preco_atual)
+    except Exception:
+        return None
+
+    if preco_atual <= 0:
+        return None
+
+    precos = _extrair_precos_validos(historico_60d)
+
     if not precos:
         return None
 
-    hoje     = date.today()
-    data_voo = date.fromisoformat(data_voo_iso)
-    dias_voo = (data_voo - hoje).days
+    dias_voo = _dias_ate_voo(data_voo_iso)
 
-    media    = sum(precos) / len(precos)
-    media_30 = [h["preco"] for h in historico_60d if h["dias_atras"] <= 30]
-    media_30 = sum(media_30) / max(1, len(media_30))
-    minimo   = min(precos)
-    maximo   = max(precos)
+    if dias_voo is None:
+        return None
 
-    dias_mais_barato = sum(1 for p in precos if p < preco_atual)
-    total_dias       = len(precos)
+    total_pontos = len(precos)
 
-    # Tendência 14 dias (regressão linear simples)
-    ult14 = [h["preco"] for h in historico_60d if h["dias_atras"] <= 14]
-    slope = 0.0
-    if len(ult14) >= 3:
-        n   = len(ult14)
-        xs  = list(range(n))
-        xm  = sum(xs) / n
-        ym  = sum(ult14) / n
-        num = sum((xs[i] - xm) * (ult14[i] - ym) for i in range(n))
-        den = sum((xs[i] - xm) ** 2 for i in range(n))
-        slope = num / den if den else 0.0
+    precos_passados = [
+        float(h["preco"])
+        for h in historico_60d
+        if h.get("dias_atras", 0) > 0 and h.get("preco")
+    ]
 
-    # Sequências de alta/baixa
-    seq_alta = seq_baixa = 0
-    ultimos = [h["preco"] for h in sorted(historico_60d, key=lambda x: x["dias_atras"])[:14]]
-    for i in range(1, len(ultimos)):
-        if ultimos[i] > ultimos[i - 1]:
-            seq_alta += 1; seq_baixa = 0
-        elif ultimos[i] < ultimos[i - 1]:
-            seq_baixa += 1; seq_alta = 0
-        else:
-            seq_alta = seq_baixa = 0
+    if not precos_passados:
+        precos_passados = precos
 
-    pct_vs_media = (preco_atual - media_30) / media_30 * 100
+    minimo_anterior = min(precos_passados)
+    maximo = max(precos_passados)
 
-    # Zona de tempo
-    if dias_voo > 100:   zona = "longe"
-    elif dias_voo > 60:  zona = "zona1"
-    elif dias_voo > 20:  zona = "zona2"
-    else:                zona = "perigo"
+    precos_30d = [
+        float(h["preco"])
+        for h in historico_60d
+        if h.get("dias_atras", 999) <= 30 and h.get("dias_atras", 0) > 0 and h.get("preco")
+    ]
 
-    # Tendência
-    if slope > 5:        tendencia = "subindo"
-    elif slope < -5:     tendencia = "caindo"
-    else:                tendencia = "estavel"
+    if not precos_30d:
+        precos_30d = precos_passados
 
-    def _fmt_pct(pct):
-        return "na média" if abs(pct) < 2 else f"{pct:+.0f}%"
+    media_30 = sum(precos_30d) / len(precos_30d)
+    mediana_30 = median(precos_30d)
+    p25_30 = _percentil(precos_30d, 25)
+
+    pct_vs_media = ((preco_atual - media_30) / media_30) * 100
+
+    # ── 1. CLASSIFICAÇÃO DO PREÇO ───────────────────────────────────────────
+
+    if preco_atual <= minimo_anterior:
+        preco_status = "MINIMO"
+    elif preco_atual <= p25_30 or pct_vs_media <= -8:
+        preco_status = "EXCELENTE"
+    elif preco_atual <= media_30 * 1.04 or preco_atual <= mediana_30 * 1.06:
+        preco_status = "JUSTO"
+    else:
+        preco_status = "ALTO"
+
+    # ── 2. CLASSIFICAÇÃO DA URGÊNCIA ────────────────────────────────────────
+
+    if dias_voo > 60:
+        tempo_status = "LONGE"
+    elif 25 <= dias_voo <= 60:
+        tempo_status = "MEDIO"
+    else:
+        tempo_status = "CURTO"
 
     linhas = []
 
-    # Preço vs média
-    if pct_vs_media < -10:
-        linhas += [f"✅ *Preço abaixo da média* dos últimos 30 dias",
-                   f"   R$ {preco_atual:.0f} vs média R$ {media_30:.0f} ({_fmt_pct(pct_vs_media)})"]
-    elif pct_vs_media < 5:
-        linhas += [f"🟡 *Preço próximo da média* dos últimos 30 dias",
-                   f"   R$ {preco_atual:.0f} vs média R$ {media_30:.0f} ({_fmt_pct(pct_vs_media)})"]
+    # ── 3. MATRIZ DE DECISÃO ────────────────────────────────────────────────
+
+    if preco_status == "MINIMO":
+        linhas += [
+            "🔥 *OPORTUNIDADE REAL DE COMPRA:*",
+            f"   Este é o menor valor registado no histórico recente monitorizado.",
+            f"   O preço atual está em *{_formatar_moeda(preco_atual)}*.",
+            "   Tarifas que chegam ao piso histórico costumam ter pouca duração.",
+            "   _👉 Recomendação: Se tem certeza da viagem, este é um excelente momento para emitir._",
+        ]
+
+    elif preco_status == "EXCELENTE":
+        if tempo_status == "LONGE":
+            linhas += [
+                "🔥 *ACHADO ANTECIPADO:*",
+                f"   O preço caiu para *{_formatar_moeda(preco_atual)}*, abaixo do padrão recente desta rota.",
+                f"   Como faltam {dias_voo} dias, ainda pode haver oscilações, mas o valor atual já é muito competitivo.",
+                "   _👉 Recomendação: Se a viagem está definida, vale muito considerar a compra agora._",
+            ]
+        elif tempo_status == "MEDIO":
+            linhas += [
+                "🎯 *JANELA DE OURO ABERTA:*",
+                "   Entrámos num período importante de compra e o valor atual está abaixo da média recente.",
+                f"   Média dos últimos 30 dias: {_formatar_moeda(media_30)}.",
+                "   _👉 Recomendação: COMPRE se a viagem já está decidida. Esperar pode trazer risco de alta._",
+            ]
+        else:
+            linhas += [
+                "🚀 *RARIDADE DE ÚLTIMA HORA:*",
+                f"   Encontrar uma tarifa boa a apenas {dias_voo} dias do voo é pouco comum.",
+                f"   O valor atual está em *{_formatar_moeda(preco_atual)}*.",
+                "   _👉 Recomendação: Emita o quanto antes se a viagem for certa._",
+            ]
+
+    elif preco_status == "JUSTO":
+        if tempo_status == "LONGE":
+            linhas += [
+                "⏳ *VALE A PENA ACOMPANHAR:*",
+                f"   A tarifa atual de *{_formatar_moeda(preco_atual)}* está dentro do padrão esperado.",
+                f"   Como faltam {dias_voo} dias, ainda há espaço para oscilações.",
+                "   _👉 Recomendação: Pode aguardar. Vamos continuar a monitorizar para tentar capturar uma queda._",
+            ]
+        elif tempo_status == "MEDIO":
+            linhas += [
+                "⚠️ *ALERTA DE SEGURANÇA:*",
+                f"   O valor está dentro da faixa normal, em *{_formatar_moeda(preco_atual)}*.",
+                "   Porém, a data do voo começa a aproximar-se.",
+                "   _👉 Recomendação: Se não pode adiar a viagem, comprar agora reduz o risco de pagar mais caro depois._",
+            ]
+        else:
+            linhas += [
+                "⏰ *ÚLTIMA CHAMADA:*",
+                f"   O preço está regular, mas faltam apenas {dias_voo} dias para o embarque.",
+                "   Nesta janela, quedas ainda podem acontecer, mas o risco de alta costuma ser maior.",
+                "   _👉 Recomendação: Se a viagem for necessária, compre agora._",
+            ]
+
     else:
-        linhas += [f"🔴 *Preço acima da média* dos últimos 30 dias",
-                   f"   R$ {preco_atual:.0f} vs média R$ {media_30:.0f} ({_fmt_pct(pct_vs_media)})"]
-
-    linhas.append("")
-
-    # Contexto de zona
-    if zona == "longe":
-        linhas.append(f"📅 Faltam *{dias_voo} dias* — ainda bem cedo.")
-        if tendencia == "caindo":
-            linhas.append("   Preço em queda, sem pressa para decidir.")
-        elif tendencia == "subindo" and pct_vs_media < 0:
-            linhas.append("   Estava abaixo da média mas subindo. Vale monitorar.")
+        if tempo_status == "LONGE":
+            linhas += [
+                "🛑 *NÃO PARECE UM BOM MOMENTO:*",
+                f"   A passagem está acima da média recente, em *{_formatar_moeda(preco_atual)}*.",
+                "   Com bastante antecedência, as companhias podem testar preços mais altos.",
+                "   _👉 Recomendação: Aguarde novas oscilações antes de comprar._",
+            ]
+        elif tempo_status == "MEDIO":
+            linhas += [
+                "❌ *MOMENTO DESFAVORÁVEL:*",
+                f"   O preço atual está acima da média recente de {_formatar_moeda(media_30)}.",
+                "   Pode ser apenas um pico temporário, mas já existe algum risco por causa da aproximação da data.",
+                "   _👉 Recomendação: Se possível, aguarde alguns dias e continue monitorando._",
+            ]
         else:
-            linhas.append("   Monitorando e avisando qualquer variação relevante.")
+            linhas += [
+                "🚨 *ZONA DE EMERGÊNCIA:*",
+                f"   O preço está alto, em *{_formatar_moeda(preco_atual)}*, e o voo está próximo.",
+                f"   Faltam apenas {dias_voo} dias para o embarque.",
+                "   _👉 Recomendação: Se a viagem for inadiável, compre antes que o valor piore. Se tiver flexibilidade, considere alterar a data._",
+            ]
 
-    elif zona == "zona1":
-        if pct_vs_media < -5 and tendencia != "subindo":
-            linhas += [f"👀 Faltam *{dias_voo} dias* — período que pode ter surpresas boas.",
-                       "   Preço abaixo da média. Às vezes surgem as melhores oportunidades aqui.",
-                       "   _Não é urgente, mas vale avaliar._"]
-        elif pct_vs_media < -5 and tendencia == "subindo":
-            linhas += [f"👀 Faltam *{dias_voo} dias* — período de possíveis oportunidades.",
-                       "   Preço estava bom mas está subindo. Fique atento."]
-        else:
-            linhas += [f"👀 Faltam *{dias_voo} dias* — pode ter bons preços nesse período.",
-                       "   Continue monitorando."]
+    # ── 4. MEMÓRIA COMPARATIVA ──────────────────────────────────────────────
 
-    elif zona == "zona2":
-        if pct_vs_media <= 5 and tendencia != "subindo":
-            linhas += [f"⏳ Faltam *{dias_voo} dias* — você está na *última janela* antes da alta final.",
-                       "   Preço dentro do esperado para esse período.",
-                       "   _A partir das 3 últimas semanas os preços tendem a subir bastante._",
-                       "   _Não há garantias, mas o contexto é favorável para comprar._"]
-        elif pct_vs_media <= 5 and tendencia == "subindo":
-            linhas += [f"⚠️ Faltam *{dias_voo} dias* — dentro da janela, mas subindo.",
-                       "   Se continuar assim por mais 2-3 dias, pode ser que o piso já passou.",
-                       "   _Vale decidir em breve._"]
-        else:
-            linhas += [f"⚠️ Faltam *{dias_voo} dias* — dentro da janela mas preço acima da média.",
-                       "   Ainda tem tempo, mas a janela está se fechando."]
+    ponto_5d = next(
+        (
+            h for h in historico_60d
+            if 4 <= h.get("dias_atras", 999) <= 7 and h.get("preco")
+        ),
+        None,
+    )
 
-    elif zona == "perigo":
-        if tendencia == "subindo":
-            linhas += [f"🚨 Faltam *{dias_voo} dias* — fase de alta.",
-                       "   Preço subindo. Esperar tende a sair mais caro.",
-                       "   _Se o voo for essencial, o risco de aguardar é alto._"]
-        elif tendencia == "caindo":
-            linhas += [f"🚨 Faltam *{dias_voo} dias* — fase de alta, mas preço caindo.",
-                       "   Queda nesse período é rara. Pode ser oportunidade pontual."]
-        else:
-            linhas += [f"🚨 Faltam *{dias_voo} dias* — fase de alta.",
-                       "   Historicamente os preços ficam altos agora.",
-                       "   _Se precisar do voo, evite esperar muito._"]
+    if ponto_5d:
+        preco_5d = float(ponto_5d["preco"])
+        diferenca = preco_atual - preco_5d
 
-    linhas.append("")
+        if diferenca <= -40:
+            linhas.append(
+                f"📉 *Evolução recente:* O preço recuou *{_formatar_moeda(abs(diferenca))}* em relação a {ponto_5d['dias_atras']} dias atrás."
+            )
+        elif diferenca >= 40:
+            linhas.append(
+                f"🔺 *Evolução recente:* O preço subiu *{_formatar_moeda(diferenca)}* em relação a {ponto_5d['dias_atras']} dias atrás."
+            )
 
-    # Tendência recente
-    if seq_alta >= 5:
-        linhas.append(f"📈 Subindo há *{seq_alta} dias seguidos*")
-    elif seq_baixa >= 5:
-        linhas.append(f"📉 Caindo há *{seq_baixa} dias seguidos*")
-    elif tendencia == "subindo":
-        linhas.append("📈 Tendência de alta nos últimos 14 dias")
-    elif tendencia == "caindo":
-        linhas.append("📉 Tendência de queda nos últimos 14 dias")
-    else:
-        linhas.append("➡️ Preço estável nos últimos 14 dias")
+    # ── 5. RESUMO TÉCNICO DISCRETO ──────────────────────────────────────────
 
-    linhas.append("")
-
-    # Referência histórica
-    linhas.append("\U0001F4CA *Histórico 60 dias:*")
-    linhas.append(f"   Mínimo: R$ {minimo:.0f}  |  Máximo: R$ {maximo:.0f}  |  Média: R$ {media:.0f}")
-    if dias_mais_barato > 0:
-        linhas.append(f"   Nos últimos {total_dias} dias, esteve mais barato em *{dias_mais_barato} deles*")
-    else:
-        linhas.append(f"   Este é o *menor preço* dos últimos {total_dias} dias 🎯")
-
-    # Destaque: mínimo histórico
-    if preco_atual <= minimo:
-        linhas.insert(0, "🎯 *Mínimo histórico dos últimos 60 dias!*\n")
+    linhas.append(
+        f"📊 *Referência:* média 30d {_formatar_moeda(media_30)} | menor anterior {_formatar_moeda(minimo_anterior)}."
+    )
 
     return "\n".join(linhas)
 
 
 def checar_alertas_especiais(
-    chat_id,
-    dados: dict,
-    preco_atual: float,
     historico_60d: list,
-    enviar_fn,
-) -> bool:
+    preco_atual: float,
+    dados: dict,
+) -> list:
     """
-    Verifica mínimo histórico, alta sustentada e variação brusca.
-    Usa enviar_fn(chat_id, texto) para desacoplar do módulo telegram.
-    Retorna True se enviou algum alerta.
+    Verificações rápidas e gatilhos de push em tempo real.
     """
+
     if not historico_60d or preco_atual is None:
-        return False
+        return []
+
+    try:
+        preco_atual = float(preco_atual)
+    except Exception:
+        return []
+
+    if preco_atual <= 0:
+        return []
+
+    alertas = []
 
     hist_salvo = dados.get("historico_precos", {})
-    precos     = [h["preco"] for h in historico_60d]
-    minimo     = min(precos)
-    alertas    = []
+    precos = _extrair_precos_validos(historico_60d)
 
-    # Mínimo histórico
-    if preco_atual <= minimo:
+    if not precos:
+        return []
+
+    precos_passados = [
+        float(h["preco"])
+        for h in historico_60d
+        if h.get("dias_atras", 0) > 0 and h.get("preco")
+    ]
+
+    if not precos_passados:
+        precos_passados = precos
+
+    minimo_anterior = min(precos_passados)
+
+    # ── Alerta 1: mínimo histórico real ─────────────────────────────────────
+
+    if preco_atual <= minimo_anterior:
         alertas.append(
-            "🎯 *Mínimo histórico atingido!*\n"
-            f"R$ {preco_atual:.0f} — menor preço dos últimos 60 dias."
+            "🎯 *ALERTA DE MÍNIMO HISTÓRICO!*\n"
+            f"O preço atingiu o menor valor do histórico recente: *{_formatar_moeda(preco_atual)}*.\n"
+            "🔥 Esta é uma das melhores oportunidades registadas até agora."
         )
 
-    # Alta sustentada >= 7 dias
-    seq_alta = hist_salvo.get("seq_alta", 0)
-    ant      = hist_salvo.get("preco_anterior")
+    # ── Sequência de altas ─────────────────────────────────────────────────
+
+    seq_alta = int(hist_salvo.get("seq_alta", 0) or 0)
+    ant = hist_salvo.get("preco_anterior")
+
+    try:
+        ant = float(ant) if ant else None
+    except Exception:
+        ant = None
+
     if ant:
-        seq_alta = seq_alta + 1 if preco_atual > ant else 0
-    hist_salvo["seq_alta"]       = seq_alta
+        if preco_atual > ant:
+            seq_alta += 1
+        else:
+            seq_alta = 0
+
+    hist_salvo["seq_alta"] = seq_alta
     hist_salvo["preco_anterior"] = preco_atual
-    dados["historico_precos"]    = hist_salvo
+    dados["historico_precos"] = hist_salvo
 
     if seq_alta == 7:
         alertas.append(
-            f"📈 *Alta por 7 dias seguidos*\n"
-            f"Preço subiu de R$ {ant:.0f} para R$ {preco_atual:.0f}.\n"
-            "Pode não voltar ao preço anterior."
+            "📈 *Aviso de Tendência: Alta por 7 verificações seguidas*\n"
+            f"O preço vem subindo de forma consecutiva e agora está em *{_formatar_moeda(preco_atual)}*.\n"
+            "O mercado parece ter estabilizado em alta. Reduza a expectativa de quedas fortes no curto prazo."
         )
 
-    # Variação brusca (>15% num dia)
-    if ant and abs(preco_atual - ant) / ant * 100 >= 15:
-        sinal = "subiu" if preco_atual > ant else "caiu"
-        pct   = abs(preco_atual - ant) / ant * 100
-        alertas.append(
-            f"⚡ *Variação brusca detectada*\n"
-            f"Preço {sinal} {pct:.0f}% em 1 dia.\n"
-            f"R$ {ant:.0f} → R$ {preco_atual:.0f}"
-        )
+    # ── Alerta 2: queda brusca ──────────────────────────────────────────────
 
-    for alerta in alertas:
-        enviar_fn(chat_id, alerta)
-        time.sleep(0.3)
+    if ant and ant > 0:
+        queda_pct = ((ant - preco_atual) / ant) * 100
 
-    return bool(alertas)
+        if queda_pct >= 12:
+            alertas.append(
+                "⚡ *QUEDA BRUSCA DETECTADA!*\n"
+                f"O preço caiu de {_formatar_moeda(ant)} para *{_formatar_moeda(preco_atual)}* desde a última verificação.\n"
+                "Pode ter surgido um lote promocional temporário."
+            )
+
+    return alertas
