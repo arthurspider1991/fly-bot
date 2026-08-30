@@ -1,0 +1,40 @@
+# Fly Bot v5 — deploy em VM (Oracle Cloud Always Free / qualquer VPS com Docker)
+#
+#   docker compose up -d --build     # sobe / atualiza
+#   docker compose logs -f           # acompanha logs
+#   docker compose restart           # reinicia
+#   docker compose down              # para
+#
+# O banco vive em ./data/bot.db no host (bind mount) — sobrevive a rebuilds e reboots.
+
+services:
+  flybot:
+    build: .
+    image: flybot:latest
+    container_name: flybot
+    restart: unless-stopped
+
+    # Segredos e config vêm do .env (crie a partir do .env.example).
+    env_file: .env
+
+    # Sobrescreve o que não deve ser configurável à mão:
+    environment:
+      DB_FILE: /data/bot.db
+      TZ: America/Sao_Paulo
+      PYTHONUNBUFFERED: "1"
+
+    volumes:
+      - ./data:/data
+
+    # Chromium headless: mais /dev/shm evita crashes de aba.
+    shm_size: "1gb"
+
+    # Trava de segurança de memória (a VM Always Free ARM tem MUITO mais que isso).
+    mem_limit: "4g"
+
+    # Logs não podem crescer sem limite no disco da VM.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
